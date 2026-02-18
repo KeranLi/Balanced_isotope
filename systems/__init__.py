@@ -20,6 +20,10 @@ def get_c_system():
     from systems.c.model import CIsotopeSystem
     return CIsotopeSystem
 
+def get_n_system():
+    from systems.n.model import NIsotopeSystem
+    return NIsotopeSystem
+
 __all__ = [
     'IsotopeSystem',
     'MultiIsotopeSystem', 
@@ -27,5 +31,6 @@ __all__ = [
     'IsotopeParameters',
     'ModelResult',
     'get_mg_system',
-    'get_c_system'
+    'get_c_system',
+    'get_n_system'
 ]
