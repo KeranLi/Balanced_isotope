@@ -25,8 +25,11 @@ Examples:
   # C同位素DOC模型
   python cli.py c --scenario dice --plot
   
-  # U同位素稳态计算
+  # U同位素单点计算
   python cli.py u --delta-carb -0.65 --steady-state
+  
+  # U同位素批量处理Excel文件
+  python cli.py u --file data/uranium_data.xlsx --output results/u_results.xlsx
   
   # U同位素带不确定度分析
   python cli.py u --delta-carb -0.65 --steady-state --uncertainty mc --n-samples 50000
@@ -46,7 +49,8 @@ Examples:
     
     # ===== Mg同位素命令 =====
     mg_parser = subparsers.add_parser('mg', help='Mg isotope system')
-    mg_parser.add_argument('--file', type=str, help='Input data file (xlsx/csv)')
+    mg_parser.add_argument('--file', type=str, 
+                          help='Input Excel/CSV file with Mg isotope data for batch processing')
     mg_parser.add_argument('--column', type=str, default='delta_26_Mg_iso',
                           choices=['delta_25_Mg_iso', 'delta_26_Mg_iso'],
                           help='Isotope column name')
@@ -73,12 +77,14 @@ Examples:
     
     # ===== U同位素命令 =====
     u_parser = subparsers.add_parser('u', help='Uranium isotope system')
+    u_parser.add_argument('--file', type=str,
+                         help='Input Excel/CSV file with isotope data')
     u_parser.add_argument('--scenario', type=str, default='modern',
                          choices=['modern', 'oceanic_anoxic_event', 'end_permain', 
                                  'frasnian_famennian'],
                          help='Model scenario')
     u_parser.add_argument('--delta-carb', type=float,
-                         help='Measured carbonate δ²³⁸U value')
+                         help='Measured carbonate δ²³⁸U value (single point)')
     u_parser.add_argument('--steady-state', action='store_true',
                          help='Run steady-state model')
     u_parser.add_argument('--transient', action='store_true',
@@ -104,7 +110,10 @@ Examples:
                          help='Run sensitivity analysis')
     u_parser.add_argument('--confidence-level', type=float, default=0.95,
                          help='Confidence level for uncertainty intervals')
-    u_parser.add_argument('--output', type=str, help='Output file path')
+    u_parser.add_argument('--no-uncertainty', action='store_true',
+                         help='Disable uncertainty calculation for batch processing')
+    u_parser.add_argument('--output', type=str,
+                         help='Output file path (for batch processing)')
     
     # ===== 体系列表命令 =====
     subparsers.add_parser('list', help='List available isotope systems')
@@ -212,6 +221,40 @@ def run_mg_analysis(args):
     """运行Mg同位素分析"""
     print("\n=== Mg Isotope Analysis ===\n")
     
+    # 批量处理模式
+    if args.file:
+        from toolkit.io import BatchProcessor
+        
+        print(f"Batch processing mode")
+        print(f"Input file: {args.file}")
+        
+        processor = BatchProcessor(element='mg')
+        
+        try:
+            results_df = processor.process_file(
+                args.file,
+                output_path=args.output,
+                show_progress=True
+            )
+            
+            print("\n" + "=" * 50)
+            print("Processing Summary:")
+            print("=" * 50)
+            print(f"Total samples: {len(results_df)}")
+            success_count = results_df['processing_success'].sum()
+            print(f"Successful: {success_count}")
+            
+            if 'f_carbonate' in results_df.columns:
+                print(f"\nCarbonate fraction statistics:")
+                print(f"  Mean: {results_df['f_carbonate'].mean():.1%}")
+            
+            return
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+    
     from systems.mg import MgIsotopeSystem
     
     system = MgIsotopeSystem()
@@ -312,6 +355,51 @@ def run_u_analysis(args):
     """运行U同位素分析"""
     print(f"\n=== U Isotope Analysis ({args.scenario}) ===\n")
     
+    # 批量处理模式
+    if args.file:
+        from toolkit.io import BatchProcessor
+        
+        print(f"Batch processing mode")
+        print(f"Input file: {args.file}")
+        
+        processor = BatchProcessor(
+            element='u',
+            scenario=args.scenario,
+            apply_diagenetic_correction=not args.no_diagenetic_correction,
+            delta_diag=args.delta_diag,
+            include_uncertainty=not args.no_uncertainty,
+            n_monte_carlo=args.n_samples if args.n_samples < 5000 else 1000
+        )
+        
+        try:
+            results_df = processor.process_file(
+                args.file, 
+                output_path=args.output,
+                show_progress=True
+            )
+            
+            # 显示摘要
+            print("\n" + "=" * 50)
+            print("Processing Summary:")
+            print("=" * 50)
+            print(f"Total samples: {len(results_df)}")
+            success_count = results_df['processing_success'].sum()
+            print(f"Successful: {success_count}")
+            print(f"Failed: {len(results_df) - success_count}")
+            
+            if 'f_anox' in results_df.columns:
+                print(f"\nf_anox statistics:")
+                print(f"  Mean: {results_df['f_anox'].mean():.1%}")
+                print(f"  Range: [{results_df['f_anox'].min():.1%}, {results_df['f_anox'].max():.1%}]")
+            
+            return
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return
+    
+    # 单点计算模式
     from systems.u import UIsotopeSystem
     
     system = UIsotopeSystem(scenario=args.scenario)
