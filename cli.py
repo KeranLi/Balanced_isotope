@@ -19,8 +19,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Mg同位素分析
-  python cli.py mg --file data/Nie_Section_A.xlsx --column delta_26_Mg_iso
+  # Mg同位素分析 - 碳酸盐体系 (海相碳酸盐岩)
+  python cli.py mg --component-type carbonate --file data/Nie_Section_A.xlsx
+  
+  # Mg同位素分析 - 碎屑岩体系 (陆源碎屑沉积物)
+  python cli.py mg --component-type siliciclastic --delta-sample -0.10
+  
+  # Mg同位素批量处理 - 碎屑岩体系
+  python cli.py mg --component-type siliciclastic --file data/clay_samples.xlsx
   
   # C同位素DOC模型
   python cli.py c --scenario dice --plot
@@ -49,6 +55,17 @@ Examples:
     
     # ===== Mg同位素命令 =====
     mg_parser = subparsers.add_parser('mg', help='Mg isotope system (weathering flux model)')
+    
+    # 关键参数：区分碳酸盐 vs 碎屑岩体系
+    mg_parser.add_argument('--component-type', type=str, default='carbonate',
+                          choices=['carbonate', 'siliciclastic', 'silicate', 'detrital'],
+                          help='Sample component type (default: carbonate). '
+                               'carbonate=海相碳酸盐岩 (Kasemann et al., 2014); '
+                               'siliciclastic=陆源碎屑沉积物 (Hu et al., 2023)')
+    mg_parser.add_argument('--basin', type=str, default='changjiang',
+                          choices=['changjiang', 'global', 'custom'],
+                          help='Basin type for siliciclastic system (default: changjiang)')
+    
     mg_parser.add_argument('--file', type=str, 
                           help='Input Excel/CSV file with Mg isotope data for batch processing')
     mg_parser.add_argument('--column', type=str, default='delta_26_Mg_iso',
@@ -204,7 +221,7 @@ def list_systems():
     print("\n=== Available Isotope Systems ===\n")
     
     systems = [
-        ('mg', 'Magnesium', '风化-沉积体系，估算碳酸盐/硅酸盐风化比例'),
+        ('mg', 'Magnesium', 'Mg同位素风化体系'),
         ('c', 'Carbon', '碳循环，DOC氧化与碳同位素负漂'),
         ('u', 'Uranium', '海洋铀循环，氧化还原条件示踪'),
         ('s', 'Sulfur', '硫循环，硫酸盐还原（计划中）'),
@@ -217,6 +234,21 @@ def list_systems():
         print(f"  {status} {element.upper():2} - {name:12} : {description}")
     
     print("\n✓ = Implemented, ○ = Planned")
+    
+    # Mg 子体系详细说明
+    print("\n--- Mg Isotope Sub-systems ---")
+    print("\n  1. Carbonate System (--component-type carbonate)")
+    print("     Reference: Kasemann et al. (2014)")
+    print("     Input: 海相碳酸盐岩 δ²⁶Mg")
+    print("     Model: 海水沉淀分馏")
+    print("     Output: 风化比例、海水演化")
+    
+    print("\n  2. Siliciclastic System (--component-type siliciclastic)")
+    print("     Reference: Hu et al. (2023)")
+    print("     Input: 陆源碎屑沉积物 δ²⁶Mg (黏土矿物)")
+    print("     Model: 风化残余分馏 (Rayleigh)")
+    print("     Output: 硅酸盐风化通量、SWI指数")
+    
     print()
 
 
@@ -225,11 +257,16 @@ def show_info(element: str):
     print(f"\n=== {element.upper()} Isotope System ===\n")
     
     if element == 'mg':
-        from systems.mg import MgIsotopeSystem, get_mg_parameters
+        print("Mg同位素体系包含两种子体系，使用 --component-type 参数选择：\n")
+        
+        # 碳酸盐体系
+        print("[1] Carbonate System (--component-type carbonate)")
+        print("-" * 50)
+        from systems.mg import get_mg_parameters
         params = get_mg_parameters()
         
-        print(f"Element: {params.name}")
-        print(f"Reference: {params.reference_standard}")
+        print(f"Reference: Kasemann et al. (2014) EPSL")
+        print(f"Reference standard: {params.reference_standard}")
         print(f"\nEnd-members (δ²⁶Mg, ‰):")
         for name, data in params.end_members.items():
             print(f"  {name:12}: {data['delta26']:+.2f} ± {data.get('uncertainty', 0):.2f}")
@@ -238,6 +275,30 @@ def show_info(element: str):
         print(f"Input fluxes (mol/Ma):")
         for name, value in params.input_fluxes.items():
             print(f"  {name}: {value:.2e}")
+        
+        print(f"\nFractionation factors:")
+        for name, value in params.fractionation_factors.items():
+            print(f"  {name}: {value:+.2f}‰")
+        
+        # 碎屑岩体系
+        print("\n[2] Siliciclastic System (--component-type siliciclastic)")
+        print("-" * 50)
+        from systems.mg.silicate import SilicateWeatheringParams
+        sil_params = SilicateWeatheringParams()
+        
+        print(f"Reference: Hu et al. (2023) Global and Planetary Change")
+        print(f"Reference standard: DSM3")
+        print(f"\nEnd-members (δ²⁶Mg, ‰):")
+        print(f"  UCC:           {sil_params.d26Mg_UCC:+.2f}‰")
+        print(f"  Carbonate:     {sil_params.d26Mg_carbonate:+.2f}‰")
+        print(f"  River water:   {sil_params.d26Mg_river_water:+.2f}‰")
+        
+        print(f"\nFractionation factors:")
+        print(f"  Δ(fluid-protolith): {sil_params.Delta_fluid_protolith:+.2f}‰")
+        print(f"  Δ(release-clay):    {sil_params.Delta_release_clay:+.2f}‰")
+        
+        print(f"\nFluxes:")
+        print(f"  River total: {sil_params.F_river_total/1e10:.1f} × 10¹⁰ mol/yr")
     
     elif element == 'c':
         from systems.c import CIsotopeSystem, get_c_parameters
@@ -274,15 +335,33 @@ def show_info(element: str):
 
 
 def run_mg_analysis(args):
-    """运行Mg同位素风化分析 (基于Kasemann et al., 2014)"""
+    """
+    运行Mg同位素风化分析
+    
+    根据 --component-type 参数自动选择体系：
+    - carbonate: 碳酸盐体系 (Kasemann et al., 2014)
+    - siliciclastic: 碎屑岩体系 (Hu et al., 2023)
+    """
+    # 根据体系类型分派
+    component_type = args.component_type.lower()
+    
+    if component_type in ('siliciclastic', 'silicate', 'detrital'):
+        run_mg_siliciclastic_analysis(args)
+    else:
+        run_mg_carbonate_analysis(args)
+
+
+def run_mg_carbonate_analysis(args):
+    """运行碳酸盐体系Mg同位素分析 (基于Kasemann et al., 2014)"""
     print("\n" + "="*70)
     print("Mg Isotope Weathering Flux Model")
+    print("Component Type: CARBONATE (海相碳酸盐岩)")
     print("Based on: Kasemann et al. (2014) EPSL")
     print("="*70 + "\n")
     
-    from systems.mg import MgIsotopeSystem
+    from systems.mg import create_mg_system
     
-    system = MgIsotopeSystem(scenario='modern')
+    system = create_mg_system('carbonate', scenario='modern')
     
     # 应用自定义端元值
     if args.delta_silicate is not None:
@@ -342,7 +421,7 @@ def run_mg_analysis(args):
         }
         
         # 估算初始海水δ²⁶Mg
-        from systems.mg.model import WeatheringFluxConfig
+        from systems.mg.carbonate import WeatheringFluxConfig
         initial_config = WeatheringFluxConfig(
             f_silicate=args.f_initial,
             F_riv_multiplier=args.flux_multiplier
@@ -994,6 +1073,172 @@ def run_u_analysis(args):
         print(f"   f_anox = 50% → δ²³⁸U_seawater = {result3['delta238_seawater']:+.2f}‰")
     
     print()
+
+
+def run_mg_siliciclastic_analysis(args):
+    """
+    运行碎屑岩体系Mg同位素分析 (基于 Hu et al., 2023)
+    
+    适用场景：分析陆源碎屑沉积物（黏土矿物）的 Mg 同位素
+    """
+    print("\n" + "="*70)
+    print("Mg Isotope Weathering Flux Model")
+    print("Component Type: SILICICLASTIC (陆源碎屑沉积物)")
+    print("Based on: Hu et al. (2023) Global and Planetary Change")
+    print("="*70 + "\n")
+    
+    from systems.mg import create_mg_system
+    
+    # 创建碎屑岩体系
+    system = create_mg_system('siliciclastic', basin=args.basin)
+    
+    print(f"[System Configuration]")
+    print(f"  Basin type: {args.basin}")
+    print(f"  UCC δ²⁶Mg: {system.params.d26Mg_UCC:+.2f}‰")
+    print(f"  River water δ²⁶Mg: {system.params.d26Mg_river_water:+.2f}‰")
+    print(f"  Carbonate end-member: {system.params.d26Mg_carbonate:+.2f}‰")
+    print(f"  Total river flux: {system.params.F_river_total/1e10:.1f} × 10¹⁰ mol/yr")
+    print()
+    
+    # ===== 单点计算模式 =====
+    if args.delta_sample is not None:
+        print("[Single Sample Analysis]")
+        print("-" * 50)
+        
+        d26Mg_clay = args.delta_sample
+        print(f"  Input δ²⁶Mg (clay): {d26Mg_clay:.2f}‰")
+        print()
+        
+        # 运行计算
+        result = system.calculate_weathering_flux(d26Mg_clay)
+        
+        if result.success:
+            print(f"  Results:")
+            print(f"    Weathering stage: {result.weathering_stage}")
+            print(f"    Retained Mg (f_Mg): {result.f_Mg*100:.1f}%")
+            print(f"    Silicate end-member: {result.d26Mg_silicate:+.2f}‰")
+            print()
+            print(f"    Silicate weathering flux: {result.F_silicate/1e10:.2f} × 10¹⁰ mol/yr")
+            print(f"    Carbonate weathering flux: {result.F_carbonate/1e10:.2f} × 10¹⁰ mol/yr")
+            print(f"    Silicate Weathering Index (SWI): {result.SWI:.1f}%")
+            print()
+            print(f"    Mass balance check: {result.mass_balance_check:.4f}‰")
+        else:
+            print(f"  Error: {result.message}")
+        print()
+    
+    # ===== 批量处理模式 =====
+    if args.file:
+        print("[Batch Processing Mode]")
+        print("-" * 50)
+        print(f"  Input file: {args.file}")
+        print()
+        
+        import pandas as pd
+        
+        try:
+            # 读取数据
+            if args.file.endswith('.csv'):
+                df = pd.read_csv(args.file)
+            else:
+                df = pd.read_excel(args.file)
+            
+            print(f"  Loaded {len(df)} samples")
+            print()
+            
+            # 查找同位素列
+            iso_col = None
+            for col in ['delta_26_Mg_iso', 'd26Mg', 'δ26Mg', 'delta_26Mg']:
+                if col in df.columns:
+                    iso_col = col
+                    break
+            
+            if iso_col is None:
+                print(f"  Error: Isotope column not found")
+                return
+            
+            # 处理每个样品
+            results = []
+            for idx, row in df.iterrows():
+                d26Mg = row[iso_col]
+                if pd.isna(d26Mg):
+                    results.append({
+                        'success': False,
+                        'message': 'Missing data'
+                    })
+                    continue
+                
+                result = system.calculate_weathering_flux(float(d26Mg))
+                if result.success:
+                    results.append({
+                        'success': True,
+                        'f_Mg': result.f_Mg,
+                        'weathering_stage': result.weathering_stage,
+                        'd26Mg_silicate': result.d26Mg_silicate,
+                        'F_silicate': result.F_silicate,
+                        'F_carbonate': result.F_carbonate,
+                        'SWI': result.SWI,
+                    })
+                else:
+                    results.append({
+                        'success': False,
+                        'message': result.message
+                    })
+            
+            # 转换为DataFrame
+            results_df = pd.DataFrame(results)
+            
+            # 合并结果
+            output_df = pd.concat([df, results_df], axis=1)
+            
+            # 统计
+            success_count = results_df['success'].sum()
+            print(f"  Processing complete:")
+            print(f"    Successful: {success_count}/{len(df)}")
+            
+            if success_count > 0:
+                swi_values = results_df[results_df['success']]['SWI']
+                print(f"    SWI range: {swi_values.min():.1f}% - {swi_values.max():.1f}%")
+                print(f"    SWI mean: {swi_values.mean():.1f}%")
+            
+            # 保存结果
+            if args.output:
+                output_df.to_csv(args.output, index=False)
+                print(f"\n  Results saved to: {args.output}")
+            
+            print()
+            
+        except Exception as e:
+            print(f"  Error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ===== 如果没有指定操作，显示示例 =====
+    if args.delta_sample is None and not args.file:
+        print("[Example Calculation - Hu et al., 2023]")
+        print("-" * 50)
+        print("  Using typical Changjiang River values:")
+        print()
+        
+        example_values = [-0.15, -0.10, -0.05, 0.00]
+        
+        print(f"  {'δ²⁶Mg_clay':<12} {'Stage':<15} {'F_sili':<12} {'SWI':<8}")
+        print("  " + "-" * 47)
+        
+        for d26Mg in example_values:
+            result = system.calculate_weathering_flux(d26Mg)
+            if result.success:
+                print(f"  {d26Mg:<+12.2f} {result.weathering_stage:<15} "
+                      f"{result.F_silicate/1e10:<12.1f} {result.SWI:<8.1f}")
+        
+        print()
+        print("  Note: Higher δ²⁶Mg_clay indicates stronger weathering")
+        print("        (more ²⁴Mg leached, ²⁶Mg enriched in residue)")
+        print()
+    
+    print("="*70)
+    print("Analysis complete")
+    print("="*70 + "\n")
 
 
 if __name__ == '__main__':
