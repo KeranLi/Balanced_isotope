@@ -28,6 +28,12 @@ Examples:
   # U同位素稳态计算
   python cli.py u --delta-carb -0.65 --steady-state
   
+  # U同位素带不确定度分析
+  python cli.py u --delta-carb -0.65 --steady-state --uncertainty mc --n-samples 50000
+  
+  # U同位素敏感性分析
+  python cli.py u --delta-carb -0.65 --sensitivity-analysis
+  
   # U同位素非稳态模拟
   python cli.py u --transient --event-duration 1.0 --peak-f-anox 0.8
   
@@ -87,6 +93,17 @@ Examples:
                          help='Diagenetic correction factor (‰)')
     u_parser.add_argument('--no-diagenetic-correction', action='store_true',
                          help='Disable diagenetic correction')
+    u_parser.add_argument('--uncertainty', type=str, 
+                         choices=['mc', 'monte-carlo', 'bootstrap'],
+                         help='Uncertainty analysis method')
+    u_parser.add_argument('--measurement-std', type=float, default=0.05,
+                         help='Measurement uncertainty (1σ, ‰)')
+    u_parser.add_argument('--n-samples', type=int, default=10000,
+                         help='Number of Monte Carlo or bootstrap samples')
+    u_parser.add_argument('--sensitivity-analysis', action='store_true',
+                         help='Run sensitivity analysis')
+    u_parser.add_argument('--confidence-level', type=float, default=0.95,
+                         help='Confidence level for uncertainty intervals')
     u_parser.add_argument('--output', type=str, help='Output file path')
     
     # ===== 体系列表命令 =====
@@ -331,6 +348,48 @@ def run_u_analysis(args):
         # 估算缺氧面积
         anoxic_area = system.estimate_anoxic_area(result['f_anox'])
         print(f"\n  Estimated anoxic seafloor: ~{anoxic_area:.1f}%")
+        
+        # 不确定度分析
+        if args.uncertainty or args.sensitivity_analysis:
+            from systems.u import UncertaintyAnalyzer
+            analyzer = UncertaintyAnalyzer(system)
+            
+            if args.sensitivity_analysis:
+                print("\n--- Sensitivity Analysis ---")
+                sens_result = analyzer.sensitivity_analysis(args.delta_carb)
+                
+                print(f"Baseline f_anox: {sens_result['baseline_f_anox']:.1%}")
+                print("\nParameter sensitivities (ranked by importance):")
+                for item in sens_result['tornado_data'][:5]:
+                    print(f"  {item['parameter']:15}: "
+                          f"range [{item['min_effect']:+.1%}, {item['max_effect']:+.1%}]")
+            
+            if args.uncertainty in ['mc', 'monte-carlo']:
+                print(f"\n--- Monte Carlo Uncertainty Analysis ({args.n_samples} samples) ---")
+                print("Parameters with uncertainties:")
+                print(f"  Δ_sw-anox: 0.77 ± 0.04 ‰")
+                print(f"  Δ_diag: 0.40 (range 0.30-0.50) ‰")
+                print(f"  δ_river: -0.29 ± 0.16 ‰")
+                print(f"  Measurement: ±{args.measurement_std} ‰")
+                
+                mc_result = analyzer.monte_carlo_steady_state(
+                    delta238_carb=args.delta_carb,
+                    n_samples=args.n_samples,
+                    confidence_level=args.confidence_level,
+                    apply_diagenetic_correction=apply_diag
+                )
+                
+                ci_lower, ci_upper = mc_result['f_anox_ci']
+                print(f"\nResults:")
+                print(f"  f_anox mean:   {mc_result['f_anox_mean']:.1%}")
+                print(f"  f_anox median: {mc_result['f_anox_median']:.1%}")
+                print(f"  Std dev:       {mc_result['f_anox_std']:.1%}")
+                print(f"  {args.confidence_level*100:.0f}% CI:       [{ci_lower:.1%}, {ci_upper:.1%}]")
+                
+                if mc_result['convergence']['converged']:
+                    print(f"  ✓ MCMC converged (R̂ = {mc_result['convergence']['r_hat']:.3f})")
+                else:
+                    print(f"  ⚠ Consider increasing n_samples (R̂ = {mc_result['convergence']['r_hat']:.3f})")
     
     elif args.transient:
         # 非稳态模拟
