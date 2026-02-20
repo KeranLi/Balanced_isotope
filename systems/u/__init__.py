@@ -33,11 +33,21 @@ from systems.u.parameters import (
     URANIUM_STANDARDS,
     SCENARIO_PARAMETERS
 )
+from systems.u.uncertainty import (
+    UncertaintyAnalyzer,
+    UncertaintyConfig,
+    ParameterUncertainty,
+    analyze_likelihood
+)
 
 __all__ = [
     'UIsotopeSystem',
     'UraniumCycleFluxes',
     'FractionationFactors',
+    'UncertaintyAnalyzer',
+    'UncertaintyConfig',
+    'ParameterUncertainty',
+    'analyze_likelihood',
     'get_u_parameters',
     'get_scenario_info',
     'get_fractionation_ranges',
