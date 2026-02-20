@@ -25,6 +25,12 @@ Examples:
   # C同位素DOC模型
   python cli.py c --scenario dice --plot
   
+  # U同位素稳态计算
+  python cli.py u --delta-carb -0.65 --steady-state
+  
+  # U同位素非稳态模拟
+  python cli.py u --transient --event-duration 1.0 --peak-f-anox 0.8
+  
   # 列出支持的体系
   python cli.py list
         """
@@ -59,13 +65,37 @@ Examples:
                          help='Generate plots')
     c_parser.add_argument('--output', type=str, help='Output file path')
     
+    # ===== U同位素命令 =====
+    u_parser = subparsers.add_parser('u', help='Uranium isotope system')
+    u_parser.add_argument('--scenario', type=str, default='modern',
+                         choices=['modern', 'oceanic_anoxic_event', 'end_permain', 
+                                 'frasnian_famennian'],
+                         help='Model scenario')
+    u_parser.add_argument('--delta-carb', type=float,
+                         help='Measured carbonate δ²³⁸U value')
+    u_parser.add_argument('--steady-state', action='store_true',
+                         help='Run steady-state model')
+    u_parser.add_argument('--transient', action='store_true',
+                         help='Run transient (non-steady-state) model')
+    u_parser.add_argument('--event-duration', type=float, default=1.0,
+                         help='Anoxic event duration (Myr)')
+    u_parser.add_argument('--peak-f-anox', type=float, default=0.8,
+                         help='Peak anoxic sink fraction')
+    u_parser.add_argument('--background-f-anox', type=float, default=0.2,
+                         help='Background anoxic sink fraction')
+    u_parser.add_argument('--delta-diag', type=float, default=0.4,
+                         help='Diagenetic correction factor (‰)')
+    u_parser.add_argument('--no-diagenetic-correction', action='store_true',
+                         help='Disable diagenetic correction')
+    u_parser.add_argument('--output', type=str, help='Output file path')
+    
     # ===== 体系列表命令 =====
     subparsers.add_parser('list', help='List available isotope systems')
     
     # ===== 信息命令 =====
     info_parser = subparsers.add_parser('info', help='Show system information')
     info_parser.add_argument('element', type=str,
-                            choices=['mg', 'c', 's', 'sr', 'nd'],
+                            choices=['mg', 'c', 'u', 's', 'sr', 'nd'],
                             help='Element symbol')
     
     args = parser.parse_args()
@@ -83,6 +113,8 @@ Examples:
         run_mg_analysis(args)
     elif args.command == 'c':
         run_c_analysis(args)
+    elif args.command == 'u':
+        run_u_analysis(args)
 
 
 def list_systems():
@@ -92,13 +124,14 @@ def list_systems():
     systems = [
         ('mg', 'Magnesium', '风化-沉积体系，估算碳酸盐/硅酸盐风化比例'),
         ('c', 'Carbon', '碳循环，DOC氧化与碳同位素负漂'),
+        ('u', 'Uranium', '海洋铀循环，氧化还原条件示踪'),
         ('s', 'Sulfur', '硫循环，硫酸盐还原（计划中）'),
         ('sr', 'Strontium', 'Sr同位素，风化示踪（计划中）'),
         ('nd', 'Neodymium', 'Nd同位素，洋流循环（计划中）'),
     ]
     
     for element, name, description in systems:
-        status = "✓" if element in ['mg', 'c'] else "○"
+        status = "✓" if element in ['mg', 'c', 'u'] else "○"
         print(f"  {status} {element.upper():2} - {name:12} : {description}")
     
     print("\n✓ = Implemented, ○ = Planned")
@@ -136,6 +169,24 @@ def show_info(element: str):
         
         print(f"\nDIC reservoir: {params.reservoir_mass:.2e} mol")
         print(f"Organic burial fraction: {params.fractionation_factors.get('organic_burial_fraction', 0.14)}")
+    
+    elif element == 'u':
+        from systems.u import UIsotopeSystem, get_u_parameters
+        params = get_u_parameters('modern')
+        
+        print(f"Element: {params.name}")
+        print(f"Reference: {params.reference_standard}")
+        print(f"\nEnd-members (δ²³⁸U, ‰):")
+        for name, data in params.end_members.items():
+            if isinstance(data, dict) and 'delta238' in data:
+                print(f"  {name:15}: {data['delta238']:+.2f}")
+        
+        print(f"\nReservoir mass: {params.reservoir_mass:.2e} mol")
+        print(f"Residence time: ~0.5 Myr")
+        print(f"\nFractionation factors:")
+        print(f"  Δ(ox):   {params.fractionation_factors.get('delta_sw_ox', 0):.2f}‰")
+        print(f"  Δ(anox): +{params.fractionation_factors.get('delta_sw_anox', 0):.2f}‰")
+        print(f"  Δ(diag): +{params.fractionation_factors.get('delta_diag', 0):.2f}‰")
     
     print()
 
@@ -236,6 +287,108 @@ def run_c_analysis(args):
                 print("\nGenerating plots...")
                 # TODO: 实现绘图
                 print("  (Plotting not yet fully implemented)")
+    
+    print()
+
+
+def run_u_analysis(args):
+    """运行U同位素分析"""
+    print(f"\n=== U Isotope Analysis ({args.scenario}) ===\n")
+    
+    from systems.u import UIsotopeSystem
+    
+    system = UIsotopeSystem(scenario=args.scenario)
+    info = system.get_model_info()
+    
+    print(f"Model type: {info['model_type']}")
+    print(f"Reservoir mass: {info['reservoir_mass']:.2e} mol")
+    print(f"Residence time: {info['residence_time']:.2f} Myr")
+    
+    if args.steady_state and args.delta_carb is not None:
+        # 稳态计算
+        print(f"\n--- Steady-State Calculation ---")
+        print(f"Measured δ²³⁸U_carb: {args.delta_carb:.2f}‰")
+        
+        apply_diag = not args.no_diagenetic_correction
+        result = system.calculate_f_anox_steady_state(
+            delta238_carb=args.delta_carb,
+            apply_diagenetic_correction=apply_diag,
+            delta_diag=args.delta_diag
+        )
+        
+        print(f"Diagenetic correction: {'Yes' if apply_diag else 'No'}")
+        if apply_diag:
+            print(f"  Δ_diag = {result['delta_diag']:.2f}‰")
+            print(f"  Corrected δ²³⁸U_carb: {result['delta238_carb_corrected']:.2f}‰")
+        
+        print(f"\nResults:")
+        print(f"  Seawater δ²³⁸U:  {result['delta238_seawater']:+.2f}‰")
+        print(f"  Oxic sink δ²³⁸U: {result['delta238_oxic_sink']:+.2f}‰")
+        print(f"  Anoxic sink δ²³⁸U: {result['delta238_anoxic_sink']:+.2f}‰")
+        print(f"\n  f_anox (anoxic fraction): {result['f_anox']:.1%}")
+        print(f"  f_oxic (oxic fraction):   {result['f_oxic']:.1%}")
+        
+        # 估算缺氧面积
+        anoxic_area = system.estimate_anoxic_area(result['f_anox'])
+        print(f"\n  Estimated anoxic seafloor: ~{anoxic_area:.1f}%")
+    
+    elif args.transient:
+        # 非稳态模拟
+        print(f"\n--- Transient Model Simulation ---")
+        print(f"Event duration: {args.event_duration} Myr")
+        print(f"Peak f_anox: {args.peak_f_anox}")
+        print(f"Background f_anox: {args.background_f_anox}")
+        
+        result = system.simulate_anoxic_event(
+            event_duration=args.event_duration,
+            peak_f_anox=args.peak_f_anox,
+            background_f_anox=args.background_f_anox
+        )
+        
+        if result.success:
+            data = result.data
+            delta_sw = data['delta_seawater']
+            f_anox = data['f_anox']
+            time = data['time_myr']
+            
+            # 找到最小值和事件结束后的恢复情况
+            min_idx = np.argmin(delta_sw)
+            end_idx = -1
+            
+            print(f"\nResults:")
+            print(f"  Background δ²³⁸U_sw: {delta_sw[0]:+.2f}‰")
+            print(f"  Minimum δ²³⁸U_sw:    {delta_sw[min_idx]:+.2f}‰ (at t={time[min_idx]:.2f} Myr)")
+            print(f"  Final δ²³⁸U_sw:      {delta_sw[end_idx]:+.2f}‰")
+            print(f"  Excursion amplitude: {delta_sw[min_idx] - delta_sw[0]:.2f}‰")
+            
+            # 检查是否达到平衡
+            equil = system.solve_equilibration_time(
+                target_f_anox=args.peak_f_anox,
+                initial_f_anox=args.background_f_anox
+            )
+            print(f"\n  Equilibration time: ~{equil['equilibration_time']:.2f} Myr")
+            print(f"  Theoretical minimum: {equil['final_delta']:+.2f}‰")
+        else:
+            print(f"\nError: {result.message}")
+    
+    else:
+        # 显示示例计算
+        print("\n--- Example Calculations ---")
+        
+        # 示例1: 现代条件
+        print("\n1. Modern oxic ocean:")
+        result1 = system.calculate_f_anox_steady_state(-0.45)
+        print(f"   δ²³⁸U_carb = -0.45‰ → f_anox = {result1['f_anox']:.1%}")
+        
+        # 示例2: 缺氧条件
+        print("\n2. Anoxic event:")
+        result2 = system.calculate_f_anox_steady_state(-0.85)
+        print(f"   δ²³⁸U_carb = -0.85‰ → f_anox = {result2['f_anox']:.1%}")
+        
+        # 示例3: 反向计算
+        print("\n3. Reverse calculation (f_anox → δ²³⁸U):")
+        result3 = system.calculate_seawater_delta_steady_state(f_anox=0.5)
+        print(f"   f_anox = 50% → δ²³⁸U_seawater = {result3['delta238_seawater']:+.2f}‰")
     
     print()
 
