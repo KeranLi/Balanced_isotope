@@ -1,74 +1,113 @@
 """
-Mg同位素体系模型
-实现风化-沉积体系的质量平衡和分馏计算
+Mg同位素风化通量模型
+基于Kasemann等(2014)论文的海洋箱模型实现
+
+核心功能：
+1. 双端元风化模型（硅酸盐 vs 碳酸盐）
+2. 海水Mg同位素演化模拟
+3. 风化通量反演
+4. 风化比例时间演化
 """
 
 import numpy as np
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional, List, Callable, Union
 from dataclasses import dataclass
+from scipy.optimize import minimize
 
 from systems.base.isotope_system import IsotopeSystem, ModelResult, IsotopeParameters
-from systems.mg.parameters import get_mg_parameters
-from toolkit.isotope.formulas import MassBalance, EvolutionEquations
-from toolkit.math.numerical import ODESolver, Interpolator
+from systems.mg.parameters import (
+    get_mg_parameters, get_cryogenian_parameters,
+    calculate_river_delta26, solve_f_silicate,
+    weathering_transition_linear, weathering_transition_exponential,
+    weathering_pulse
+)
+from toolkit.math.numerical import ODESolver
 
 
 @dataclass
-class MgWeatheringFluxes:
-    """Mg风化通量数据类"""
-    F_carb_in: float      # 碳酸盐风化输入 (mol/Ma)
-    F_sil_in: float       # 硅酸盐风化输入 (mol/Ma)
-    F_carb_out: float     # 碳酸盐沉积输出 (mol/Ma)
-    F_sil_out: float      # 硅酸盐相关输出 (mol/Ma)
+class WeatheringFluxConfig:
+    """风化通量配置"""
+    f_silicate: float = 0.5           # 硅酸盐风化比例
+    F_riv_multiplier: float = 1.0     # 河流总通量放大系数（相对于现代）
     
-    # 同位素值（δ²⁶Mg，‰）
-    delta_carb_in: float = -4.3   # 碳酸盐风化输入
-    delta_sil_in: float = -0.3    # 硅酸盐风化输入
-    delta_carb_out: float = -4.0  # 碳酸盐沉积
-    delta_sil_out: float = -0.5   # 硅酸盐相关输出
+    # 端元值
+    delta_silicate: float = -0.3      # 硅酸盐端元δ²⁶Mg
+    delta_carbonate: float = -2.5     # 碳酸盐端元δ²⁶Mg
+    
+    # 分馏系数
+    Delta_carb: float = -2.7          # 碳酸盐沉淀分馏（‰）
 
 
-class MgIsotopeSystem(IsotopeSystem):
+class MgWeatheringModel:
     """
-    Mg同位素体系
-    
-    主要应用：
-    1. 海水Mg同位素演化模拟
-    2. 风化通量反演
-    3. 碳酸盐-硅酸盐风化比例估算
+    Mg同位素风化模型
+    实现论文中的双端元混合和质量平衡计算
     """
     
-    ELEMENT = 'mg'
-    NAME = 'Magnesium'
-    ISOTOPES = ['24Mg', '25Mg', '26Mg']
+    def __init__(self, params: Optional[IsotopeParameters] = None):
+        self.params = params or get_mg_parameters()
+        self.M_sw = self.params.reservoir_mass  # 海水Mg储库 (mol)
+        self.F_riv_0 = self.params.input_fluxes['river_total']  # 现代河流通量
     
-    def __init__(self, parameters: Optional[IsotopeParameters] = None):
-        super().__init__(parameters or get_mg_parameters())
-        
-        # Mg专用缓存
-        self._swpre_cache: Optional[np.ndarray] = None
-    
-    def _default_parameters(self) -> IsotopeParameters:
-        return get_mg_parameters()
-    
-    # ============== 核心计算接口实现 ==============
-    
-    def mass_balance_equation(self,
-                             state: np.ndarray,
-                             fluxes: Dict[str, float],
-                             time: Optional[float] = None) -> np.ndarray:
+    def river_input(self, config: WeatheringFluxConfig) -> Tuple[float, float]:
         """
-        Mg同位素质量平衡微分方程
+        计算河流输入通量和同位素组成
         
-        state[0] = M_sw  (海水Mg浓度)
-        state[1] = δ²⁶Mg_sw  (海水Mg同位素)
+        Returns
+        -------
+        (F_riv, delta_riv) : tuple
+            河流通量 (mol/yr) 和 δ²⁶Mg值
+        """
+        F_riv = config.F_riv_multiplier * self.F_riv_0
+        delta_riv = calculate_river_delta26(
+            f_silicate=config.f_silicate,
+            delta_silicate=config.delta_silicate,
+            delta_carbonate=config.delta_carbonate
+        )
+        return F_riv, delta_riv
+    
+    def steady_state_seawater(self, config: WeatheringFluxConfig) -> float:
+        """
+        计算稳态海水δ²⁶Mg值
+        
+        δ_sw = δ_riv - (F_carb/F_riv) × Δ_carb
+        
+        假设：F_carb ≈ F_riv - F_hydro，且F_hydro定量移除Mg无分馏
+        
+        Parameters
+        ----------
+        config : WeatheringFluxConfig
+            风化配置
+            
+        Returns
+        -------
+        float
+            稳态海水δ²⁶Mg
+        """
+        F_riv, delta_riv = self.river_input(config)
+        F_hydro = self.params.input_fluxes.get('hydrothermal', 0.2 * self.F_riv_0)
+        F_carb = F_riv - F_hydro  # 碳酸盐沉淀通量
+        
+        # 稳态方程
+        delta_sw = delta_riv - (F_carb / F_riv) * config.Delta_carb
+        return delta_sw
+    
+    def derivative(self, state: np.ndarray, t: float, 
+                   config_func: Callable[[float], WeatheringFluxConfig]) -> np.ndarray:
+        """
+        计算状态变量的时间导数
+        
+        dM_sw/dt = F_riv - F_carb - F_hydro
+        dδ_sw/dt = [F_riv(δ_riv - δ_sw) - F_carb·Δ_carb] / M_sw
         
         Parameters
         ----------
         state : array_like, shape (2,)
             [M_sw, delta_sw]
-        fluxes : dict
-            包含 F_in, F_out, delta_in, delta_out
+        t : float
+            时间
+        config_func : callable
+            返回当前时间WeatheringFluxConfig的函数
             
         Returns
         -------
@@ -77,25 +116,102 @@ class MgIsotopeSystem(IsotopeSystem):
         """
         M_sw, delta_sw = state
         
-        # 总输入输出通量
-        F_in_total = fluxes.get('F_in_total', 0)
-        F_out_total = fluxes.get('F_out_total', 0)
+        # 获取当前配置
+        config = config_func(t)
         
-        # 输入同位素（加权平均）
-        delta_in = fluxes.get('delta_in', 0)
+        # 河流输入
+        F_riv, delta_riv = self.river_input(config)
         
-        # 输出分馏系数
-        alpha_out = fluxes.get('alpha_out', 1.0)
+        # 热液输出（定量移除，无分馏）
+        F_hydro = self.params.input_fluxes.get('hydrothermal', 0.2 * self.F_riv_0)
         
-        # Mg总量变化
-        dM_dt = F_in_total - F_out_total
+        # 碳酸盐沉淀（与海水平衡，产生分馏）
+        F_carb = max(0, F_riv - F_hydro)  # 确保非负
         
-        # 同位素演化（简化模型）
-        # dδ/dt = [F_in(δ_in - δ) + F_out·δ(α-1)] / M
-        d_delta_dt = (
-            F_in_total * (delta_in - delta_sw) +
-            F_out_total * delta_sw * (alpha_out - 1)
-        ) / M_sw if M_sw > 0 else 0
+        # 质量平衡
+        dM_dt = F_riv - F_carb - F_hydro
+        
+        # 同位素演化
+        if M_sw > 0:
+            d_delta_dt = (
+                F_riv * (delta_riv - delta_sw) 
+                - F_carb * config.Delta_carb
+            ) / M_sw
+        else:
+            d_delta_dt = 0
+        
+        return np.array([dM_dt, d_delta_dt])
+
+
+class MgIsotopeSystem(IsotopeSystem):
+    """
+    Mg同位素体系 - 风化通量模型
+    
+    基于Kasemann等(2014)论文实现：
+    - 双端元风化模型（硅酸盐 vs 碳酸盐）
+    - 海洋箱模型演化
+    - 风化通量反演
+    """
+    
+    ELEMENT = 'mg'
+    NAME = 'Magnesium'
+    ISOTOPES = ['24Mg', '25Mg', '26Mg']
+    
+    def __init__(self, parameters: Optional[IsotopeParameters] = None,
+                 scenario: str = 'modern'):
+        """
+        初始化Mg同位素体系
+        
+        Parameters
+        ----------
+        parameters : IsotopeParameters, optional
+            自定义参数
+        scenario : str
+            'modern' - 现代参数
+            'cryogenian' - Cryogenian时期参数
+        """
+        if parameters is None:
+            if scenario == 'cryogenian':
+                parameters = get_cryogenian_parameters()
+            else:
+                parameters = get_mg_parameters()
+        
+        super().__init__(parameters)
+        
+        # 初始化风化模型
+        self.weathering_model = MgWeatheringModel(self.params)
+        
+        # 默认端元值
+        self._delta_sil = self.params.end_members['silicate']['delta26']
+        self._delta_carb = self.params.end_members['carbonate']['delta26']
+    
+    def _default_parameters(self) -> IsotopeParameters:
+        return get_mg_parameters()
+    
+    # ============== 核心接口实现 ==============
+    
+    def mass_balance_equation(self,
+                             state: np.ndarray,
+                             fluxes: Dict[str, float],
+                             time: Optional[float] = None) -> np.ndarray:
+        """
+        质量平衡微分方程（基类接口）
+        
+        注意：推荐使用evolve_seawater()进行演化计算
+        """
+        M_sw, delta_sw = state
+        
+        F_riv = fluxes.get('F_riv', self.params.input_fluxes['river_total'])
+        delta_riv = fluxes.get('delta_riv', -1.2)
+        F_carb = fluxes.get('F_carb', F_riv * 0.8)
+        Delta_carb = fluxes.get('Delta_carb', -2.7)
+        
+        dM_dt = fluxes.get('dM_dt', 0)  # 通常假设储库恒定
+        
+        if M_sw > 0:
+            d_delta_dt = (F_riv * (delta_riv - delta_sw) - F_carb * Delta_carb) / M_sw
+        else:
+            d_delta_dt = 0
         
         return np.array([dM_dt, d_delta_dt])
     
@@ -103,60 +219,27 @@ class MgIsotopeSystem(IsotopeSystem):
                             process: str,
                             temperature: Optional[float] = None,
                             **kwargs) -> float:
-        """
-        获取Mg分馏系数
-        
-        Parameters
-        ----------
-        process : str
-            'carb_sw', 'sil_sw', 'precipitation', 'weathering'
-        temperature : float, optional
-            温度（K）
-            
-        Returns
-        -------
-        float
-            分馏系数 α
-        """
+        """获取分馏系数"""
         epsilon = self.params.fractionation_factors.get(process, 0)
-        
-        # 温度校正（如果有）
-        if temperature is not None and process in ['carb_sw', 'precipitation']:
-            # 简化温度依赖：每升高100K，分馏减小约0.1‰
-            temp_correction = -0.001 * (temperature - 298) / 100
-            epsilon += temp_correction
-        
-        # ε转换为α
         return 1 + epsilon / 1000
     
     def mixing_model(self,
                     end_member_values: np.ndarray,
                     proportions: np.ndarray) -> float:
-        """
-        端元混合模型
-        
-        Parameters
-        ----------
-        end_member_values : array_like
-            各端元的δ²⁶Mg值
-        proportions : array_like
-            各端元的比例（和为1）
-            
-        Returns
-        -------
-        float
-            混合后的δ²⁶Mg值
-        """
-        return MassBalance.multi_component_mixing(
-            end_member_values, proportions, 
-            standard_ratio=self.params.reference_ratios['26/24']
-        )
+        """端元混合模型"""
+        proportions = np.array(proportions)
+        proportions = proportions / np.sum(proportions)  # 归一化
+        return float(np.sum(end_member_values * proportions))
+    
+    def state_dimension(self) -> int:
+        """状态维度"""
+        return 2
     
     # ============== Mg专用方法 ==============
     
     def calculate_weathering_ratio(self,
                                   delta_sample: float,
-                                  delta_seawater: float,
+                                  delta_seawater: Optional[float] = None,
                                   method: str = 'two_endmember') -> Dict[str, float]:
         """
         计算风化端元比例
@@ -164,93 +247,156 @@ class MgIsotopeSystem(IsotopeSystem):
         Parameters
         ----------
         delta_sample : float
-            样品δ²⁶Mg
-        delta_seawater : float
-            同期海水δ²⁶Mg
+            样品δ²⁶Mg（沉积碳酸盐）
+        delta_seawater : float, optional
+            同期海水δ²⁶Mg，默认使用稳态值
         method : str
-            'two_endmember' 或 'three_endmember'
+            'two_endmember' - 碳酸盐 vs 硅酸盐
+            'from_river' - 从河流组成计算
             
         Returns
         -------
         dict
-            各端元比例
+            {
+                'f_silicate': 硅酸盐风化比例,
+                'f_carbonate': 碳酸盐风化比例,
+                'delta_river': 估算的河流δ²⁶Mg
+            }
         """
-        end_members = self.params.end_members
+        if delta_seawater is None:
+            delta_seawater = self.params.end_members['seawater']['delta26']
+        
+        # 从碳酸盐δ²⁶Mg反演海水δ²⁶Mg
+        # δ_carb = δ_sw + Δ_carb  →  δ_sw = δ_carb - Δ_carb
+        delta_riv_est = delta_sample - (-2.7)  # 简化：假设分馏系数-2.7‰
         
         if method == 'two_endmember':
-            # 简化的二元混合：碳酸盐 vs 硅酸盐
-            delta_carb = end_members['carbonate']['delta26']
-            delta_sil = end_members['silicate']['delta26']
-            
-            # 质量平衡：delta_sample = f_carb * delta_carb + (1-f_carb) * delta_sil
-            # 求解 f_carb
-            if abs(delta_carb - delta_sil) < 0.001:
-                f_carb = 0.5  # 避免除零
-            else:
-                f_carb = (delta_sample - delta_sil) / (delta_carb - delta_sil)
-            
-            # 限制在合理范围
-            f_carb = np.clip(f_carb, 0, 1)
+            f_sil = solve_f_silicate(delta_riv_est, self._delta_sil, self._delta_carb)
             
             return {
-                'f_carbonate': float(f_carb),
-                'f_silicate': float(1 - f_carb)
+                'f_silicate': float(f_sil),
+                'f_carbonate': float(1 - f_sil),
+                'delta_river': float(delta_riv_est)
             }
         
-        elif method == 'three_endmember':
-            # 三元混合：碳酸盐 + 硅酸盐 + 海水
-            # 需要额外的约束条件
-            raise NotImplementedError("Three end-member mixing not yet implemented")
+        elif method == 'from_river':
+            # 直接给定河流组成
+            f_sil = solve_f_silicate(delta_sample, self._delta_sil, self._delta_carb)
+            return {
+                'f_silicate': float(f_sil),
+                'f_carbonate': float(1 - f_sil),
+                'delta_river': float(delta_sample)
+            }
         
         else:
             raise ValueError(f"Unknown method: {method}")
     
-    def calculate_swpre(self,
-                       rm_data: np.ndarray,
-                       decay_constant: float = 0.001) -> np.ndarray:
-        """
-        计算风化前信号（swpre）
-        这是原mass_balance_model.py中的核心算法
-        
-        Parameters
-        ----------
-        rm_data : array_like
-            沉积物Mg同位素数据
-        decay_constant : float
-            衰减常数
-            
-        Returns
-        -------
-        array_like
-            swpre值
-        """
-        n = len(rm_data)
-        swpre = np.zeros(n)
-        
-        for i in range(n):
-            decay = np.arange(i, n)
-            Rdecay = np.exp(-decay_constant * (decay - i) / 100)
-            swpre[i] = np.sum(rm_data[i:] * Rdecay) / np.sum(Rdecay)
-        
-        self._swpre_cache = swpre
-        return swpre
-    
-    def seawater_evolution(self,
-                          time_span: Tuple[float, float],
-                          initial_delta: float = -0.5,
-                          flux_scenario: str = 'modern',
-                          n_points: int = 1000) -> ModelResult:
+    def evolve_seawater(self,
+                       time_span: Tuple[float, float],
+                       f_silicate_func: Callable[[float], float],
+                       flux_multiplier_func: Optional[Callable[[float], float]] = None,
+                       initial_delta: float = -0.83,
+                       n_points: int = 1000) -> ModelResult:
         """
         模拟海水Mg同位素演化
+        
+        核心方程：
+        dδ_sw/dt = [F_riv(δ_riv - δ_sw) - F_carb·Δ_carb] / M_sw
+        
+        其中：
+        - δ_riv = f_sil × δ_sil + (1-f_sil) × δ_carb
+        - F_riv = φ(t) × F_riv_0 （φ为通量放大系数）
         
         Parameters
         ----------
         time_span : tuple
-            (start_age, end_age) in Ma
+            (t_start, t_end)，单位：年
+        f_silicate_func : callable
+            硅酸盐风化比例函数 f_sil(t)
+        flux_multiplier_func : callable, optional
+            通量放大系数函数 φ(t)，默认恒为1
         initial_delta : float
             初始海水δ²⁶Mg
-        flux_scenario : str
-            'modern', 'high_weathering', 'low_weathering'
+        n_points : int
+            时间点数
+            
+        Returns
+        -------
+        ModelResult
+            包含时间序列的结果
+        """
+        if flux_multiplier_func is None:
+            flux_multiplier_func = lambda t: 1.0
+        
+        # 创建配置函数
+        def config_func(t: float) -> WeatheringFluxConfig:
+            return WeatheringFluxConfig(
+                f_silicate=f_silicate_func(t),
+                F_riv_multiplier=flux_multiplier_func(t),
+                delta_silicate=self._delta_sil,
+                delta_carbonate=self._delta_carb,
+                Delta_carb=-2.7
+            )
+        
+        # 初始状态 [M_sw, delta_sw]
+        initial_state = np.array([self.params.reservoir_mass, initial_delta])
+        
+        # 定义ODE
+        def ode_func(t: float, y: np.ndarray) -> np.ndarray:
+            return self.weathering_model.derivative(y, t, config_func)
+        
+        # 求解
+        solver = ODESolver()
+        result = solver.solve(ode_func, initial_state, time_span, n_points=n_points)
+        
+        if result.success:
+            # 计算伴随的通量信息
+            times = result.t
+            f_sil_history = np.array([f_silicate_func(t) for t in times])
+            flux_mult_history = np.array([flux_multiplier_func(t) for t in times])
+            delta_riv_history = np.array([
+                calculate_river_delta26(f, self._delta_sil, self._delta_carb)
+                for f in f_sil_history
+            ])
+            
+            return ModelResult(
+                success=True,
+                time=times,
+                values=result.y,
+                data={
+                    'M_sw': result.y[:, 0],
+                    'delta_sw': result.y[:, 1],
+                    'f_silicate': f_sil_history,
+                    'f_carbonate': 1 - f_sil_history,
+                    'flux_multiplier': flux_mult_history,
+                    'delta_river': delta_riv_history
+                }
+            )
+        else:
+            return ModelResult(success=False, message=result.message)
+    
+    def simulate_weathering_transition(self,
+                                      time_span: Tuple[float, float],
+                                      transition: Dict[str, float],
+                                      initial_delta: float = -0.83,
+                                      n_points: int = 1000) -> ModelResult:
+        """
+        模拟风化转变情景
+        
+        Parameters
+        ----------
+        time_span : tuple
+            (t_start, t_end)，单位：Ma
+        transition : dict
+            {
+                't_start': 转变开始时间 (Ma),
+                't_end': 转变结束时间 (Ma),
+                'f_initial': 初始硅酸盐比例,
+                'f_final': 最终硅酸盐比例,
+                'mode': 'linear' or 'exponential'
+            }
+        initial_delta : float
+            初始海水δ²⁶Mg
         n_points : int
             时间点数
             
@@ -258,49 +404,90 @@ class MgIsotopeSystem(IsotopeSystem):
         -------
         ModelResult
         """
-        # 根据情景设置通量
-        if flux_scenario == 'modern':
-            F_carb = self.params.input_fluxes['rivers_carbonate']
-            F_sil = self.params.input_fluxes['rivers_silicate']
-        elif flux_scenario == 'high_weathering':
-            F_carb = self.params.input_fluxes['rivers_carbonate'] * 1.5
-            F_sil = self.params.input_fluxes['rivers_silicate'] * 2.0
-        elif flux_scenario == 'low_weathering':
-            F_carb = self.params.input_fluxes['rivers_carbonate'] * 0.5
-            F_sil = self.params.input_fluxes['rivers_silicate'] * 0.5
+        t_start = transition.get('t_start', time_span[0])
+        t_end = transition.get('t_end', time_span[1])
+        f_initial = transition.get('f_initial', 0.2)  # 初始以碳酸盐为主
+        f_final = transition.get('f_final', 0.8)      # 最终以硅酸盐为主
+        mode = transition.get('mode', 'linear')
+        
+        # 转换为年
+        t_start_yr = t_start * 1e6
+        t_end_yr = t_end * 1e6
+        time_span_yr = (time_span[0] * 1e6, time_span[1] * 1e6)
+        
+        if mode == 'linear':
+            f_func = lambda t: weathering_transition_linear(
+                t, t_start_yr, t_end_yr, f_initial, f_final
+            )
+        elif mode == 'exponential':
+            tau = (t_end_yr - t_start_yr) / 3  # 3τ达到95%
+            f_func = lambda t: weathering_transition_exponential(
+                t - t_start_yr, tau, f_initial, f_final
+            )
         else:
-            raise ValueError(f"Unknown scenario: {flux_scenario}")
+            raise ValueError(f"Unknown mode: {mode}")
         
-        # 计算输入同位素（加权平均）
-        delta_carb = self.params.end_members['carbonate']['delta26']
-        delta_sil = self.params.end_members['silicate']['delta26']
+        return self.evolve_seawater(
+            time_span=time_span_yr,
+            f_silicate_func=f_func,
+            initial_delta=initial_delta,
+            n_points=n_points
+        )
+    
+    def simulate_cryogenian_scenario(self,
+                                    duration_ma: float = 3.0,
+                                    n_points: int = 1000) -> ModelResult:
+        """
+        模拟Cryogenian冰期后情景（基于Kasemann等2014论文）
         
-        F_total = F_carb + F_sil
-        delta_in = (F_carb * delta_carb + F_sil * delta_sil) / F_total
+        情景设定：
+        - 阶段1（0-0.5 Myr）：混合风化，高总通量（9×现代）
+        - 阶段2（0.5-1.5 Myr）：硅酸盐主导风化（6×现代）
         
-        # 输出通量（简化为稳态）
-        F_out = F_total
+        Parameters
+        ----------
+        duration_ma : float
+            总模拟时长（Myr）
+        n_points : int
+            时间点数
+            
+        Returns
+        -------
+        ModelResult
+        """
+        # 定义风化比例随时间变化
+        def f_silicate_func(t: float) -> float:
+            t_ma = t / 1e6
+            if t_ma < 0.5:
+                return 0.5  # 混合风化
+            else:
+                return 0.8  # 硅酸盐主导
         
-        # 分馏系数
-        alpha_out = self.fractionation_factor('carb_sw_equilibrium')
+        # 定义总通量放大系数
+        def flux_multiplier_func(t: float) -> float:
+            t_ma = t / 1e6
+            if t_ma < 0.5:
+                return 9.0   # 高风化通量
+            else:
+                return 6.0   # 中等硅酸盐风化
         
-        fluxes = {
-            'F_in_total': F_total,
-            'F_out_total': F_out,
-            'delta_in': delta_in,
-            'alpha_out': alpha_out
-        }
+        # 初始条件：假设冰期后以碳酸盐风化为主
+        initial_delta = calculate_river_delta26(0.2, self._delta_sil, self._delta_carb)
+        initial_delta -= 2.7  # 减去分馏得到海水值
         
-        # 初始状态 [M_sw, delta_sw]
-        M_sw = self.params.reservoir_mass
-        initial_state = np.array([M_sw, initial_delta])
-        
-        return self.time_evolution(initial_state, time_span, fluxes, n_points)
+        return self.evolve_seawater(
+            time_span=(0, duration_ma * 1e6),
+            f_silicate_func=f_silicate_func,
+            flux_multiplier_func=flux_multiplier_func,
+            initial_delta=initial_delta,
+            n_points=n_points
+        )
     
     def inverse_weathering_flux(self,
                                age_data: np.ndarray,
-                               delta_data: np.ndarray,
-                               delta_uncertainty: Optional[np.ndarray] = None) -> ModelResult:
+                               delta_carb_data: np.ndarray,
+                               delta_uncertainty: Optional[np.ndarray] = None,
+                               assume_steady_state: bool = False) -> ModelResult:
         """
         从观测数据反演风化通量历史
         
@@ -308,56 +495,60 @@ class MgIsotopeSystem(IsotopeSystem):
         ----------
         age_data : array_like
             年龄数据（Ma）
-        delta_data : array_like
-            δ²⁶Mg观测值
+        delta_carb_data : array_like
+            碳酸盐δ²⁶Mg观测值
         delta_uncertainty : array_like, optional
             观测误差
+        assume_steady_state : bool
+            是否假设稳态（简化计算）
             
         Returns
         -------
         ModelResult
-            包含反演的风化通量历史
+            包含反演结果
         """
-        # 简化的反演：假设稳态，求解通量比
         n = len(age_data)
-        f_carb_history = np.zeros(n)
         
-        delta_carb = self.params.end_members['carbonate']['delta26']
-        delta_sil = self.params.end_members['silicate']['delta26']
+        # 反演硅酸盐风化比例
+        f_sil_history = np.zeros(n)
+        delta_riv_history = np.zeros(n)
         
         for i in range(n):
-            # 二元混合反演
-            delta = delta_data[i]
-            if abs(delta_carb - delta_sil) > 0.001:
-                f_carb = (delta - delta_sil) / (delta_carb - delta_sil)
-                f_carb_history[i] = np.clip(f_carb, 0, 1)
+            # δ_carb = δ_sw + Δ_carb
+            # 假设沉积碳酸盐与海水平衡
+            delta_sw = delta_carb_data[i] - (-2.7)  # +2.7‰分馏
+            
+            if assume_steady_state:
+                # 稳态：δ_sw = δ_riv - (F_carb/F_riv) × Δ_carb
+                # 简化：假设 δ_riv ≈ δ_sw + 0.5 × Δ_carb
+                delta_riv = delta_sw + 0.5 * (-2.7)
+            else:
+                # 非稳态：直接使用δ_sw作为河流估算
+                delta_riv = delta_sw
+            
+            delta_riv_history[i] = delta_riv
+            f_sil_history[i] = solve_f_silicate(delta_riv, self._delta_sil, self._delta_carb)
         
         result = ModelResult(success=True)
-        result.add('age', age_data)
-        result.add('f_carbonate', f_carb_history)
-        result.add('f_silicate', 1 - f_carb_history)
+        result.add('age_ma', age_data)
+        result.add('f_silicate', f_sil_history)
+        result.add('f_carbonate', 1 - f_sil_history)
+        result.add('delta_river_inferred', delta_riv_history)
+        
+        if delta_uncertainty is not None:
+            # 误差传播（简化）
+            result.add('f_silicate_error', delta_uncertainty / abs(self._delta_sil - self._delta_carb))
         
         return result
     
-    # ============== 工具方法实现 ==============
-    
-    def state_dimension(self) -> int:
-        """状态变量维度：M_sw, δ²⁶Mg_sw"""
-        return 2
-    
     def validate_data(self, data: Dict[str, np.ndarray]) -> Tuple[bool, str]:
-        """
-        验证Mg同位素数据
-        """
-        required_fields = ['delta_26_mg']
+        """验证Mg同位素数据"""
+        if 'delta_26_mg' not in data and 'delta26Mg' not in data:
+            return False, "Missing required field: delta_26_mg or delta26Mg"
         
-        for field in required_fields:
-            if field not in data and 'delta_26_Mg' not in data:
-                return False, f"Missing required field: {field}"
+        delta_values = data.get('delta_26_mg', data.get('delta26Mg'))
         
-        # 检查数值范围
-        delta_values = data.get('delta_26_mg', data.get('delta_26_Mg'))
         if np.any(delta_values < -10) or np.any(delta_values > 5):
-            return False, "Delta values out of reasonable range (-10 to 5)"
+            return False, "Delta values out of reasonable range (-10 to 5 ‰)"
         
         return True, "Validation passed"
