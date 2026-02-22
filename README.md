@@ -88,6 +88,16 @@ Balanced_isotope/
 
 详见 [MIGRATION.md](MIGRATION.md)
 
+## 文档
+
+| 文档 | 内容 |
+|------|------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 项目架构设计 |
+| [MG_CLI_GUIDE.md](MG_CLI_GUIDE.md) | Mg同位素CLI使用指南 |
+| [UNCERTAINTY_ANALYSIS.md](UNCERTAINTY_ANALYSIS.md) | 不确定度分析方法 |
+| [docs/ODESOLVER_GUIDE.md](docs/ODESOLVER_GUIDE.md) | **ODE求解器使用指南** |
+| [BATCH_PROCESSING.md](BATCH_PROCESSING.md) | 批量数据处理 |
+
 ## 参考
 
 - Mg同位素模型参考：原 `calculation/` 和 `main.py`
