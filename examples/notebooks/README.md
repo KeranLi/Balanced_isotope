@@ -40,6 +40,7 @@ jupyter lab
 | 文件 | 内容 | 难度 |
 |------|------|------|
 | `01_basic_usage.ipynb` | 核心工具、同位素公式、各体系基础用法 | ⭐ 入门 |
+| `02_nitrogen_isotope_reproduction.ipynb` | **N同位素论文复现**：Kang et al. (2023) & Ma et al. (2025) | ⭐⭐ 进阶 |
 
 ## 使用建议
 

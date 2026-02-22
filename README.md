@@ -41,7 +41,12 @@ python examples/basic_usage.py
 
 # Jupyter Notebook 交互式示例
 pip install jupyter
+
+# 基础用法
 jupyter notebook examples/notebooks/01_basic_usage.ipynb
+
+# N同位素论文复现 (Kang et al. 2023 & Ma et al. 2025)
+jupyter notebook examples/notebooks/02_nitrogen_isotope_reproduction.ipynb
 
 # CLI方式
 python cli.py list
