@@ -31,6 +31,15 @@ Examples:
   # C同位素DOC模型
   python cli.py c --scenario dice
   
+  # N同位素正向计算
+  python cli.py n --f-assimilator 0.5
+  
+  # N同位素反向计算
+  python cli.py n --delta15N 3.0 --inverse
+  
+  # N同位素关系曲线
+  python cli.py n --curve --output n_curve.csv
+  
   # U同位素单点计算
   python cli.py u --delta-carb -0.65 --steady-state
   
@@ -146,6 +155,31 @@ Examples:
 
     c_parser.add_argument('--output', type=str, help='Output file path')
     
+    # ===== N同位素命令 =====
+    n_parser = subparsers.add_parser('n', help='Nitrogen isotope system')
+    n_parser.add_argument('--scenario', type=str, default='modern',
+                         choices=['modern', 'early_triassic', 'neoproterozoic'],
+                         help='Model scenario')
+    n_parser.add_argument('--f-assimilator', type=float,
+                         help='Nitrate assimilator fraction (0-1) for forward model')
+    n_parser.add_argument('--delta15N', type=float,
+                         help='Sediment delta15N value for inverse model')
+    n_parser.add_argument('--inverse', action='store_true',
+                         help='Run inverse model (delta15N -> f_assimilator)')
+    n_parser.add_argument('--curve', action='store_true',
+                         help='Calculate f_assimilator vs delta15N curve')
+    n_parser.add_argument('--f-range', type=float, nargs=2, default=[0.0, 1.0],
+                         metavar=('MIN', 'MAX'),
+                         help='Range for f_assimilator (default: 0.0 1.0)')
+    n_parser.add_argument('--n-points', type=int, default=100,
+                         help='Number of points for curve calculation')
+    n_parser.add_argument('--monte-carlo', action='store_true',
+                         help='Run Monte Carlo uncertainty analysis')
+    n_parser.add_argument('--n-samples', type=int, default=10000,
+                         help='Number of Monte Carlo samples')
+    n_parser.add_argument('--output', type=str,
+                         help='Output file path (CSV format)')
+    
     # ===== U同位素命令 =====
     u_parser = subparsers.add_parser('u', help='Uranium isotope system')
     u_parser.add_argument('--file', type=str,
@@ -192,7 +226,7 @@ Examples:
     # ===== 信息命令 =====
     info_parser = subparsers.add_parser('info', help='Show system information')
     info_parser.add_argument('element', type=str,
-                            choices=['mg', 'c', 'u', 's', 'sr', 'nd'],
+                            choices=['mg', 'c', 'n', 'u', 's', 'sr', 'nd'],
                             help='Element symbol')
     
     args = parser.parse_args()
@@ -212,6 +246,8 @@ Examples:
         run_c_analysis(args)
     elif args.command == 'u':
         run_u_analysis(args)
+    elif args.command == 'n':
+        run_n_analysis(args)
 
 
 def list_systems():
@@ -221,6 +257,7 @@ def list_systems():
     systems = [
         ('mg', 'Magnesium', 'Mg同位素风化体系'),
         ('c', 'Carbon', '碳循环，DOC氧化与碳同位素负漂'),
+        ('n', 'Nitrogen', '氮循环，硝酸盐可利用性示踪'),
         ('u', 'Uranium', '海洋铀循环，氧化还原条件示踪'),
         ('s', 'Sulfur', '硫循环，硫酸盐还原（计划中）'),
         ('sr', 'Strontium', 'Sr同位素，风化示踪（计划中）'),
@@ -228,7 +265,7 @@ def list_systems():
     ]
     
     for element, name, description in systems:
-        status = "✓" if element in ['mg', 'c', 'u'] else "○"
+        status = "✓" if element in ['mg', 'c', 'n', 'u'] else "○"
         print(f"  {status} {element.upper():2} - {name:12} : {description}")
     
     print("\n✓ = Implemented, ○ = Planned")
@@ -328,6 +365,35 @@ def show_info(element: str):
         print(f"  Δ(ox):   {params.fractionation_factors.get('delta_sw_ox', 0):.2f}‰")
         print(f"  Δ(anox): +{params.fractionation_factors.get('delta_sw_anox', 0):.2f}‰")
         print(f"  Δ(diag): +{params.fractionation_factors.get('delta_diag', 0):.2f}‰")
+    
+    elif element == 'n':
+        from systems.n import NIsotopeSystem, get_n_parameters
+        params = get_n_parameters('modern')
+        
+        print(f"Element: {params.name}")
+        print(f"Reference: {params.reference_standard}")
+        print(f"\nModel: Two-box steady-state nitrogen cycle model")
+        print(f"  Reference: Kang et al. (2023) & Ma et al. (2025)")
+        
+        print(f"\nReservoir mass: {params.reservoir_mass:.2e} mol N")
+        print(f"\nInput fluxes (Tg N/a):")
+        for name, value in params.input_fluxes.items():
+            print(f"  {name}: {value:.1f}")
+        
+        print(f"\nOutput fluxes (Tg N/a):")
+        for name, value in params.output_fluxes.items():
+            print(f"  {name}: {value:.1f}")
+        
+        print(f"\nFractionation factors:")
+        ff = params.fractionation_factors
+        print(f"  ε_fix: {ff.get('epsilon_fixation', -0.5):+.1f}‰ (range: {ff.get('epsilon_fixation_min', -2.0):+.1f} to {ff.get('epsilon_fixation_max', 1.0):+.1f})")
+        print(f"  ε_wcd: {ff.get('epsilon_wcd', -26.0):+.1f}‰ (range: {ff.get('epsilon_wcd_min', -30.0):+.1f} to {ff.get('epsilon_wcd_max', -22.0):+.1f})")
+        print(f"  ε_sd:  {ff.get('epsilon_sd', 0.0):+.1f}‰")
+        
+        print(f"\nKey relationship:")
+        print(f"  δ¹⁵N_sed = (1-f) × δ¹⁵N_NH4 + f × δ¹⁵N_NO3")
+        print(f"  where f = nitrate assimilator fraction")
+        print(f"  Peak δ¹⁵N occurs at f ≈ 0.48")
     
     print()
 
@@ -1067,6 +1133,184 @@ def run_u_analysis(args):
         result3 = system.calculate_seawater_delta_steady_state(f_anox=0.5)
         print(f"   f_anox = 50% → δ²³⁸U_seawater = {result3['delta238_seawater']:+.2f}‰")
     
+    print()
+
+
+def run_n_analysis(args):
+    """
+    运行N同位素分析
+    
+    基于Kang et al. (2023)和Ma et al. (2025)的双箱稳态模型
+    """
+    print(f"\n=== N Isotope Analysis ({args.scenario}) ===\n")
+    
+    from systems.n import NIsotopeSystem
+    
+    system = NIsotopeSystem(scenario=args.scenario)
+    
+    # 显示模型信息
+    info = system.get_model_info()
+    print(f"Model: {info['name']} Isotope System")
+    print(f"Scenario: {args.scenario}")
+    print(f"Reference: Atmospheric N₂ (δ¹⁵N = 0‰)")
+    print()
+    
+    # ===== 关系曲线计算 =====
+    if args.curve:
+        print("[f_assimilator vs δ¹⁵N Curve Calculation]")
+        print("-" * 50)
+        
+        f_min, f_max = args.f_range
+        print(f"  Range: f_assimilator = [{f_min:.2f}, {f_max:.2f}]")
+        print(f"  Points: {args.n_points}")
+        
+        if args.monte_carlo:
+            print(f"  Monte Carlo samples: {args.n_samples}")
+        print()
+        
+        curve = system.calculate_f_assimilator_curve(
+            f_range=(f_min, f_max),
+            n_points=args.n_points,
+            n_monte_carlo=args.n_samples if args.monte_carlo else 1
+        )
+        
+        print("  Results (first 5 points):")
+        print(f"  {'f_assimilator':<15} {'δ¹⁵N_sed':<12}")
+        print("  " + "-" * 27)
+        for i in range(min(5, len(curve['f_assimilator']))):
+            f = curve['f_assimilator'][i]
+            delta = curve['delta15N_sed_mean'][i]
+            print(f"  {f:<15.3f} {delta:<+12.2f}")
+        
+        if len(curve['f_assimilator']) > 5:
+            print(f"  ... and {len(curve['f_assimilator'])-5} more points")
+        
+        # 找到峰值点
+        max_idx = np.argmax(curve['delta15N_sed_mean'])
+        print(f"\n  Peak δ¹⁵N: {curve['delta15N_sed_mean'][max_idx]:+.2f}‰")
+        print(f"  At f_assimilator: {curve['f_assimilator'][max_idx]:.3f}")
+        
+        # 保存结果
+        if args.output:
+            import pandas as pd
+            df = pd.DataFrame({
+                'f_assimilator': curve['f_assimilator'],
+                'delta15N_sed_mean': curve['delta15N_sed_mean']
+            })
+            if args.monte_carlo:
+                df['delta15N_sed_ci68_lower'] = curve['delta15N_sed_ci68_lower']
+                df['delta15N_sed_ci68_upper'] = curve['delta15N_sed_ci68_upper']
+                df['delta15N_sed_ci95_lower'] = curve['delta15N_sed_ci95_lower']
+                df['delta15N_sed_ci95_upper'] = curve['delta15N_sed_ci95_upper']
+            df.to_csv(args.output, index=False)
+            print(f"\n  Results saved to: {args.output}")
+        
+        print()
+        return
+    
+    # ===== 反向模型：从 delta15N 反演 f_assimilator =====
+    if args.inverse and args.delta15N is not None:
+        print("[Inverse Model: δ¹⁵N → f_assimilator]")
+        print("-" * 50)
+        
+        delta15N = args.delta15N
+        f_min, f_max = args.f_range
+        
+        print(f"  Input δ¹⁵N: {delta15N:+.2f}‰")
+        print(f"  Search range: f_assimilator = [{f_min:.2f}, {f_max:.2f}]")
+        print()
+        
+        result = system.inverse_model(
+            delta15N_sed=delta15N,
+            f_range=(f_min, f_max)
+        )
+        
+        print(f"  Results:")
+        print(f"    f_assimilator: {result['f_assimilator']:.4f}")
+        print(f"    Calculated δ¹⁵N: {result['delta15N_sed_calculated']:+.2f}‰")
+        print(f"    Residual: {result['residual']:+.4f}‰")
+        
+        # 解释
+        f = result['f_assimilator']
+        if f < 0.1:
+            interp = "Nitrate-depleted (anoxic)"
+        elif f < 0.3:
+            interp = "Nitrate-limited"
+        elif f < 0.5:
+            interp = "Moderate nitrate availability"
+        else:
+            interp = "Nitrate-sufficient (oxic)"
+        print(f"    Interpretation: {interp}")
+        
+        # 蒙特卡洛不确定性
+        if args.monte_carlo:
+            print(f"\n  Monte Carlo Uncertainty Analysis ({args.n_samples} samples)...")
+            mc_result = system.monte_carlo_simulation(
+                f_assimilator=f,
+                n_samples=args.n_samples
+            )
+            print(f"    δ¹⁵N_sed: {mc_result['delta15N_sed_mean']:.2f} ± {mc_result['delta15N_sed_std']:.2f}‰")
+            print(f"    95% CI: [{mc_result['delta15N_sed_ci95'][0]:.2f}, {mc_result['delta15N_sed_ci95'][1]:.2f}]‰")
+        
+        print()
+        return
+    
+    # ===== 正向模型：从 f_assimilator 计算 delta15N =====
+    if args.f_assimilator is not None:
+        print("[Forward Model: f_assimilator → δ¹⁵N]")
+        print("-" * 50)
+        
+        f = args.f_assimilator
+        print(f"  Input f_assimilator: {f:.4f}")
+        print()
+        
+        # 计算储库同位素
+        reservoirs = system.calculate_reservoir_isotopes(f)
+        delta15N = system.forward_model(f)
+        
+        print(f"  Results:")
+        print(f"    δ¹⁵N_ammonium: {reservoirs['delta15N_ammonium']:+.2f}‰")
+        print(f"    δ¹⁵N_nitrate: {reservoirs['delta15N_nitrate']:+.2f}‰")
+        print(f"    δ¹⁵N_sediment: {delta15N:+.2f}‰")
+        
+        # 蒙特卡洛不确定性
+        if args.monte_carlo:
+            print(f"\n  Monte Carlo Uncertainty Analysis ({args.n_samples} samples)...")
+            mc_result = system.monte_carlo_simulation(
+                f_assimilator=f,
+                n_samples=args.n_samples
+            )
+            print(f"    Mean δ¹⁵N_sed: {mc_result['delta15N_sed_mean']:.2f}‰")
+            print(f"    Std dev: {mc_result['delta15N_sed_std']:.2f}‰")
+            print(f"    95% CI: [{mc_result['delta15N_sed_ci95'][0]:.2f}, {mc_result['delta15N_sed_ci95'][1]:.2f}]‰")
+        
+        print()
+        return
+    
+    # ===== 默认：显示示例 =====
+    print("[Example Calculations]")
+    print("-" * 50)
+    
+    f_values = [0.0, 0.11, 0.25, 0.48, 0.7, 1.0]
+    
+    print(f"  {'f_assimilator':<15} {'δ¹⁵N_sed':<12} {'Nitrate Status'}")
+    print("  " + "-" * 50)
+    
+    for f in f_values:
+        delta15N = system.forward_model(f)
+        if f < 0.1:
+            status = "Depleted (Anoxic)"
+        elif f < 0.3:
+            status = "Limited"
+        elif f < 0.5:
+            status = "Moderate"
+        else:
+            status = "Sufficient (Oxic)"
+        print(f"  {f:<15.2f} {delta15N:<+12.2f} {status}")
+    
+    print(f"\n  Note: Peak δ¹⁵N occurs at f ≈ 0.48")
+    print(f"        Lower f = more water-column denitrification")
+    print(f"        Higher f = more nitrate assimilation")
     print()
 
 
