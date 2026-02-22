@@ -57,14 +57,29 @@ VS Code 原生支持 Jupyter Notebook：
 2. 使用 Colab 打开
 3. 安装依赖: `!pip install numpy scipy pandas`
 
+### 绘图功能
+
+部分 Notebook 包含 matplotlib 绘图，可以：
+- 在 Notebook 中直接显示图表
+- 保存为 PNG 文件（自动保存到当前目录）
+- 导出为 PDF 或 HTML 时保留图表
+
+**N 同位素 Notebook 包含的图表：**
+- 关系曲线图 (f_assimilator vs δ¹⁵N)
+- 反向反演结果图
+- 三阶段对比图
+- 时间序列演化图
+- 蒙特卡洛不确定性分析
+- 论文对比图
+
 ### 导出为其他格式
 
 ```bash
 # 导出为 Python 脚本
 jupyter nbconvert --to script 01_basic_usage.ipynb
 
-# 导出为 HTML
-jupyter nbconvert --to html 01_basic_usage.ipynb
+# 导出为 HTML (包含图表)
+jupyter nbconvert --to html 02_nitrogen_isotope_reproduction.ipynb
 
 # 导出为 PDF
 jupyter nbconvert --to pdf 01_basic_usage.ipynb
