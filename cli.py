@@ -29,7 +29,7 @@ Examples:
   python cli.py mg --component-type siliciclastic --file data/clay_samples.xlsx
   
   # C同位素DOC模型
-  python cli.py c --scenario dice --plot
+  python cli.py c --scenario dice
   
   # U同位素单点计算
   python cli.py u --delta-carb -0.65 --steady-state
@@ -113,8 +113,7 @@ Examples:
     
     # 通用输出
     mg_parser.add_argument('--output', type=str, help='Output file path (CSV format)')
-    mg_parser.add_argument('--plot', action='store_true',
-                          help='Generate and save plots')
+
     mg_parser.add_argument('--n-points', type=int, default=500,
                           help='Number of time points for simulation (default: 500)')
     
@@ -144,8 +143,7 @@ Examples:
                          help='DOC remineralization flux (mol/Ma)')
     c_parser.add_argument('--target-excursion', type=float,
                          help='Target carbon isotope excursion (negative, in permil)')
-    c_parser.add_argument('--plot', action='store_true',
-                         help='Generate plots')
+
     c_parser.add_argument('--output', type=str, help='Output file path')
     
     # ===== U同位素命令 =====
@@ -878,10 +876,7 @@ def run_c_analysis(args):
             print(f"  ~2‰ excursion: F_odoc ≈ {F_odoc[idx_2]/1e18:.2f}×10¹⁸ mol/Ma")
             print(f"  ~4‰ excursion: F_odoc ≈ {F_odoc[idx_4]/1e18:.2f}×10¹⁸ mol/Ma")
             
-            if args.plot:
-                print("\nGenerating plots...")
-                # TODO: 实现绘图
-                print("  (Plotting not yet fully implemented)")
+
     
     print()
 

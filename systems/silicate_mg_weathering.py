@@ -11,7 +11,7 @@
 import numpy as np
 from dataclasses import dataclass
 from typing import Optional, Tuple
-import matplotlib.pyplot as plt
+
 
 
 @dataclass
@@ -237,75 +237,6 @@ class SilicateWeatheringModel:
         }
 
 
-def plot_weathering_model_results(results: dict, save_path: Optional[str] = None):
-    """
-    可视化风化模型结果
-    """
-    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-    
-    # 1. 碎屑 δ²⁶Mg vs 风化程度
-    ax = axes[0, 0]
-    ax.plot(results['d26Mg_clay'], results['f_Mg'] * 100, 'b-', linewidth=2)
-    ax.set_xlabel('碎屑黏土 δ²⁶Mg (‰)', fontsize=12)
-    ax.set_ylabel('保留Mg比例 f_Mg (%)', fontsize=12)
-    ax.set_title('风化程度 vs 碎屑同位素组成', fontsize=13)
-    ax.axhline(y=100, color='gray', linestyle='--', alpha=0.5)
-    ax.axvline(x=-0.25, color='gray', linestyle='--', alpha=0.5, label='UCC')
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    
-    # 2. 碎屑 δ²⁶Mg vs 硅酸盐风化通量
-    ax = axes[0, 1]
-    ax.plot(results['d26Mg_clay'], np.array(results['F_sili']) / 1e10, 'r-', linewidth=2, label='$F_{sili}$')
-    ax.plot(results['d26Mg_clay'], np.array(results['F_car']) / 1e10, 'g--', linewidth=2, label='$F_{car}$')
-    ax.set_xlabel('碎屑黏土 δ²⁶Mg (‰)', fontsize=12)
-    ax.set_ylabel('Mg 通量 (×10¹⁰ mol/yr)', fontsize=12)
-    ax.set_title('风化通量分解', fontsize=13)
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    # 3. 硅酸盐风化强度指数 (SWI)
-    ax = axes[1, 0]
-    ax.plot(results['d26Mg_clay'], results['SWI'], 'purple', linewidth=2)
-    ax.fill_between(results['d26Mg_clay'], 0, results['SWI'], alpha=0.3, color='purple')
-    ax.set_xlabel('碎屑黏土 δ²⁶Mg (‰)', fontsize=12)
-    ax.set_ylabel('SWI (%)', fontsize=12)
-    ax.set_title('硅酸盐风化强度指数', fontsize=13)
-    ax.axhline(y=50, color='gray', linestyle='--', alpha=0.5)
-    ax.grid(True, alpha=0.3)
-    
-    # 4. 端元混合图
-    ax = axes[1, 1]
-    # 混合线
-    x_mix = np.linspace(0, 100, 100)
-    d26Mg_mix = (
-        x_mix/100 * results['d26Mg_sili'][len(results['d26Mg_sili'])//2] + 
-        (1-x_mix/100) * (-2.0)
-    )
-    ax.plot(x_mix, d26Mg_mix, 'k-', linewidth=1, alpha=0.5)
-    
-    # 端元
-    ax.scatter([0, 100], [-2.0, results['d26Mg_sili'][len(results['d26Mg_sili'])//2]], 
-               c=['green', 'red'], s=100, zorder=5)
-    ax.text(0, -2.1, '碳酸盐\n风化', ha='center', fontsize=10)
-    ax.text(100, results['d26Mg_sili'][len(results['d26Mg_sili'])//2]-0.1, '硅酸盐\n风化', 
-            ha='center', fontsize=10)
-    
-    # 河水观测
-    ax.scatter([50], [-1.14], c='blue', s=150, marker='*', zorder=5, label='河水实测')
-    ax.set_xlabel('硅酸盐贡献 (%)', fontsize=12)
-    ax.set_ylabel('混合 δ²⁶Mg (‰)', fontsize=12)
-    ax.set_title('双端元混合模型', fontsize=13)
-    ax.legend()
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    
-    plt.show()
-
 
 def example_usage():
     """
@@ -368,10 +299,6 @@ def example_usage():
     print(f"  均值: {mc_results['SWI_mean']:.1f}%")
     print(f"  标准差: {mc_results['SWI_std']:.1f}%")
     print(f"  95% CI: [{mc_results['SWI_95ci'][0]:.1f}, {mc_results['SWI_95ci'][1]:.1f}]%")
-    
-    # 可视化
-    print("\n【生成可视化】")
-    plot_weathering_model_results(results)
     
     return model, results, mc_results
 

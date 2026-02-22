@@ -46,9 +46,7 @@ class SIsotopeSystem(MultiIsotopeSystem):
         """计算MIF - TODO"""
         raise NotImplementedError("S system not yet fully implemented")
     
-    def triple_isotope_plot(self, data):
-        """三同位素图解 - TODO"""
-        raise NotImplementedError("S system not yet fully implemented")
+
     
     def state_dimension(self):
         return 3  # δ³⁴S, Δ³³S, Δ³⁶S
