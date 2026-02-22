@@ -38,7 +38,10 @@ python run.py tools        # 核心工具演示
 
 # 具体案例
 python examples/basic_usage.py
-python examples/dice_doc_oxidation.py
+
+# Jupyter Notebook 交互式示例
+pip install jupyter
+jupyter notebook examples/notebooks/01_basic_usage.ipynb
 
 # CLI方式
 python cli.py list
