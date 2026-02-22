@@ -398,23 +398,7 @@ class MultiIsotopeSystem(IsotopeSystem):
         """
         pass
     
-    @abstractmethod
-    def triple_isotope_plot(self,
-                           data: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
-        """
-        准备三同位素图解数据
-        
-        Parameters
-        ----------
-        data : dict
-            同位素数据
-            
-        Returns
-        -------
-        dict
-            绘图所需数据
-        """
-        pass
+
 
 
 class RadiogenicSystem(IsotopeSystem):
