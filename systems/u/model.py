@@ -770,24 +770,49 @@ class UIsotopeSystem(IsotopeSystem):
     
     def estimate_anoxic_area(self,
                             f_anox: float,
-                            area_modern: float = 0.5) -> float:
+                            method: str = 'power') -> float:
         """
         从 f_anox 估算海底缺氧面积
         
-        假设缺氧面积与 f_anox 成正比。
+        基于 Tissot & Dauphas (2015) 现代海洋数据 
+        和 Song et al. (2017) 古代事件数据拟合。
+        
+        现代海洋: f_anox ≈ 0.14, Area ≈ 0.21% (Tissot & Dauphas, 2015)
+        古代事件: f_anox ≈ 0.68-0.84, Area ≈ 9-19% (Song et al., 2017)
+        
+        拟合公式: Area = 29.5 × f_anox^2.51
         
         Parameters
         ----------
         f_anox : float
-            缺氧汇比例
-        area_modern : float
-            现代缺氧面积比例 (%)
+            缺氧汇比例 (0-1)
+        method : str, optional
+            计算方法:
+            - 'power': 幂函数拟合 (默认, 推荐)
+            - 'linear': 简单线性近似 (仅用于对比)
             
         Returns
         -------
         float
             估算的缺氧面积比例 (%)
+            
+        References
+        ----------
+        - Tissot, F.L. & Dauphas, N. (2015). Uranium isotopic compositions 
+          of the crust and ocean. GCA, 167, 113-143.
+        - Song, H. et al. (2017). Uranium and carbon isotopes document 
+          global-ocean redox variation. Geology, 45(10), 1-4.
         """
-        # 现代 f_anox ≈ 0.2，缺氧面积 ≈ 0.5%
-        f_anox_modern = 0.2
-        return area_modern * (f_anox / f_anox_modern)
+        if f_anox <= 0:
+            return 0.0
+        
+        if method == 'power':
+            # 幂函数拟合: Area = 29.5 × f_anox^2.51
+            # 基于现代 (0.14, 0.21%) 和古代 (0.84, 19%) 数据
+            return 29.5 * (f_anox ** 2.51)
+        elif method == 'linear':
+            # 线性近似: Area = 1.5 × f_anox
+            # 仅适用于低 f_anox (现代条件)
+            return 1.5 * f_anox
+        else:
+            raise ValueError(f"Unknown method: {method}. Use 'power' or 'linear'.")
