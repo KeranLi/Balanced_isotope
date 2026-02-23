@@ -57,12 +57,55 @@ VS Code 原生支持 Jupyter Notebook：
 2. 使用 Colab 打开
 3. 安装依赖: `!pip install numpy scipy pandas`
 
-### 绘图功能
+### 绘图功能与高清显示
 
-部分 Notebook 包含 matplotlib 绘图，可以：
-- 在 Notebook 中直接显示图表
-- 保存为 PNG 文件（自动保存到当前目录）
-- 导出为 PDF 或 HTML 时保留图表
+部分 Notebook 包含 matplotlib 绘图，已配置为**高清显示**：
+
+```python
+# 高清显示设置
+plt.rcParams['figure.dpi'] = 150           # 显示DPI
+plt.rcParams['savefig.dpi'] = 300          # 保存DPI
+%config InlineBackend.figure_format = 'svg' # 矢量图格式
+```
+
+**优势：**
+- **SVG 格式**：矢量图，无限缩放不模糊
+- **高 DPI**：显示清晰，保存高质量图片
+- **自动保存**：PNG 文件保存到当前目录（300 DPI）
+
+**如果图表仍然模糊，可以尝试：**
+
+```python
+# 方案1: 使用更高的DPI
+%config InlineBackend.figure_format = 'retina'  # Mac高清屏
+plt.rcParams['figure.dpi'] = 200
+
+# 方案2: 增大图表尺寸
+plt.rcParams['figure.figsize'] = (12, 8)
+
+# 方案3: 在代码中单独设置
+fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
+```
+
+**设置边框粗细：**
+
+```python
+# 方法1: 全局设置（影响所有后续图表）
+plt.rcParams['axes.linewidth'] = 2.5  # 坐标轴边框粗细，默认1.5
+plt.rcParams['xtick.major.width'] = 2.0  # X轴刻度线粗细
+plt.rcParams['ytick.major.width'] = 2.0  # Y轴刻度线粗细
+
+# 方法2: 单独设置某个图表的边框
+fig, ax = plt.subplots(figsize=(12, 8))
+for spine in ax.spines.values():
+    spine.set_linewidth(2.5)  # 设置所有边框粗细
+
+# 方法3: 设置特定边框（如只加粗底边和左边）
+ax.spines['top'].set_visible(False)      # 隐藏上边框
+ax.spines['right'].set_visible(False)    # 隐藏右边框
+ax.spines['bottom'].set_linewidth(2.5)   # 加粗底边
+ax.spines['left'].set_linewidth(2.5)     # 加粗左边
+```
 
 **N 同位素 Notebook 包含的图表：**
 - 关系曲线图 (f_assimilator vs δ¹⁵N)
