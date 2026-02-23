@@ -1028,7 +1028,6 @@ def run_u_analysis(args):
     if args.steady_state and args.delta_carb is not None:
         # 稳态计算
         print(f"\n--- Steady-State Calculation ---")
-        print(f"Measured δ²³⁸U_carb: {args.delta_carb:.2f}‰")
         
         apply_diag = not args.no_diagenetic_correction
         result = system.calculate_f_anox_steady_state(
@@ -1037,21 +1036,30 @@ def run_u_analysis(args):
             delta_diag=args.delta_diag
         )
         
-        print(f"Diagenetic correction: {'Yes' if apply_diag else 'No'}")
+        # === 输入参数 ===
+        print(f"\n[Input Parameters]")
+        print(f"  Measured δ²³⁸U_carb:     {args.delta_carb:+.2f}‰")
+        print(f"  Diagenetic correction:   {'Yes' if apply_diag else 'No'}")
         if apply_diag:
-            print(f"  Δ_diag = {result['delta_diag']:.2f}‰")
-            print(f"  Corrected δ²³⁸U_carb: {result['delta238_carb_corrected']:.2f}‰")
+            print(f"    Δ_diag:                {result['delta_diag']:+.2f}‰")
+            print(f"    Corrected δ²³⁸U_carb:  {result['delta238_carb_corrected']:+.2f}‰")
         
-        print(f"\nResults:")
-        print(f"  Seawater δ²³⁸U:  {result['delta238_seawater']:+.2f}‰")
-        print(f"  Oxic sink δ²³⁸U: {result['delta238_oxic_sink']:+.2f}‰")
-        print(f"  Anoxic sink δ²³⁸U: {result['delta238_anoxic_sink']:+.2f}‰")
-        print(f"\n  f_anox (anoxic fraction): {result['f_anox']:.1%}")
-        print(f"  f_oxic (oxic fraction):   {result['f_oxic']:.1%}")
+        # === 同位素结果 ===
+        print(f"\n[Isotope Results]")
+        print(f"  Seawater δ²³⁸U:          {result['delta238_seawater']:+.2f}‰")
+        print(f"  Oxic sink δ²³⁸U:         {result['delta238_oxic_sink']:+.2f}‰")
+        print(f"  Anoxic sink δ²³⁸U:       {result['delta238_anoxic_sink']:+.2f}‰")
         
-        # 估算缺氧面积
+        # === 汇比例 ===
+        print(f"\n[Sink Fractions]")
+        print(f"  f_anox (anoxic):         {result['f_anox']:+.1%}")
+        print(f"  f_oxic (oxic):           {result['f_oxic']:+.1%}")
+        
+        # === 缺氧面积估算 ===
         anoxic_area = system.estimate_anoxic_area(result['f_anox'])
-        print(f"\n  Estimated anoxic seafloor: ~{anoxic_area:.1f}%")
+        print(f"\n[Anoxic Seafloor Area]")
+        print(f"  Estimated:               ~{anoxic_area:.1f}%")
+        print(f"  (Based on Tissot & Dauphas 2015; Song et al. 2017)")
         
         # 不确定度分析
         if args.uncertainty or args.sensitivity_analysis:
@@ -1059,22 +1067,23 @@ def run_u_analysis(args):
             analyzer = UncertaintyAnalyzer(system)
             
             if args.sensitivity_analysis:
-                print("\n--- Sensitivity Analysis ---")
+                print("\n[Sensitivity Analysis]")
                 sens_result = analyzer.sensitivity_analysis(args.delta_carb)
                 
-                print(f"Baseline f_anox: {sens_result['baseline_f_anox']:.1%}")
-                print("\nParameter sensitivities (ranked by importance):")
+                print(f"  Baseline f_anox:         {sens_result['baseline_f_anox']:+.1%}")
+                print("  Parameter sensitivities (ranked):")
                 for item in sens_result['tornado_data'][:5]:
-                    print(f"  {item['parameter']:15}: "
-                          f"range [{item['min_effect']:+.1%}, {item['max_effect']:+.1%}]")
+                    print(f"    {item['parameter']:15}: range [{item['min_effect']:+.1%}, {item['max_effect']:+.1%}]")
             
             if args.uncertainty in ['mc', 'monte-carlo']:
-                print(f"\n--- Monte Carlo Uncertainty Analysis ({args.n_samples} samples) ---")
-                print("Parameters with uncertainties:")
-                print(f"  Δ_sw-anox: 0.77 ± 0.04 ‰")
-                print(f"  Δ_diag: 0.40 (range 0.30-0.50) ‰")
-                print(f"  δ_river: -0.29 ± 0.16 ‰")
-                print(f"  Measurement: ±{args.measurement_std} ‰")
+                print(f"\n[Monte Carlo Uncertainty Analysis]")
+                print(f"  Samples:                 {args.n_samples}")
+                print(f"  Confidence level:        {args.confidence_level*100:.0f}%")
+                print("\n  Uncertain parameters:")
+                print(f"    Δ_sw-anox:             0.77 ± 0.04 ‰")
+                print(f"    Δ_diag:                0.40 (range 0.30-0.50) ‰")
+                print(f"    δ_river:               -0.29 ± 0.16 ‰")
+                print(f"    Measurement:           ±{args.measurement_std} ‰")
                 
                 mc_result = analyzer.monte_carlo_steady_state(
                     delta238_carb=args.delta_carb,
@@ -1084,16 +1093,23 @@ def run_u_analysis(args):
                 )
                 
                 ci_lower, ci_upper = mc_result['f_anox_ci']
-                print(f"\nResults:")
-                print(f"  f_anox mean:   {mc_result['f_anox_mean']:.1%}")
-                print(f"  f_anox median: {mc_result['f_anox_median']:.1%}")
-                print(f"  Std dev:       {mc_result['f_anox_std']:.1%}")
-                print(f"  {args.confidence_level*100:.0f}% CI:       [{ci_lower:.1%}, {ci_upper:.1%}]")
+                print(f"\n  [Uncertainty Results]")
+                print(f"    f_anox mean:           {mc_result['f_anox_mean']:+.1%}")
+                print(f"    f_anox median:         {mc_result['f_anox_median']:+.1%}")
+                print(f"    Std dev:               {mc_result['f_anox_std']:+.1%}")
+                print(f"    {args.confidence_level*100:.0f}% CI:                [{ci_lower:+.1%}, {ci_upper:+.1%}]")
+                
+                # 添加缺氧面积的不确定度估算
+                area_mean = system.estimate_anoxic_area(mc_result['f_anox_mean'])
+                area_lower = system.estimate_anoxic_area(ci_lower)
+                area_upper = system.estimate_anoxic_area(ci_upper)
+                print(f"\n    Anoxic area:           ~{area_mean:.1f}%")
+                print(f"    Area {args.confidence_level*100:.0f}% CI:          [{area_lower:.1f}%, {area_upper:.1f}%]")
                 
                 if mc_result['convergence']['converged']:
-                    print(f"  ✓ MCMC converged (R̂ = {mc_result['convergence']['r_hat']:.3f})")
+                    print(f"\n  ✓ MCMC converged (R̂ = {mc_result['convergence']['r_hat']:.3f})")
                 else:
-                    print(f"  ⚠ Consider increasing n_samples (R̂ = {mc_result['convergence']['r_hat']:.3f})")
+                    print(f"\n  ⚠ Consider increasing n_samples (R̂ = {mc_result['convergence']['r_hat']:.3f})")
     
     elif args.transient:
         # 非稳态模拟
