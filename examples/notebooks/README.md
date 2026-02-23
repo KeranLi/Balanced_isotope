@@ -108,12 +108,16 @@ ax.spines['left'].set_linewidth(2.5)     # 加粗左边
 ```
 
 **N 同位素 Notebook 包含的图表：**
-- 关系曲线图 (f_assimilator vs δ¹⁵N)
+- 关系曲线图 (f_assimilator vs δ¹⁵N) - 包含现代海洋和 Huaibei Group 参考点
 - 反向反演结果图
 - 三阶段对比图
 - 时间序列演化图
 - 蒙特卡洛不确定性分析
 - 论文对比图
+
+**特殊标记说明（kang_2023_curve）：**
+- **黑色圆点**: 现代海洋 (f≈0.7, δ¹⁵N≈5‰) - Kang et al. (2023) 参考点
+- **红色圆点**: Huaibei Group 样品 (f≈0.11, δ¹⁵N≈2‰) - 新元古代 Tonian 期缺氧海洋
 
 ### 导出为其他格式
 
