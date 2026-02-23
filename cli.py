@@ -64,6 +64,24 @@ Examples:
   # U同位素非稳态模拟
   python cli.py u --transient --event-duration 1.0 --peak-f-anox 0.8
   
+  # Sr同位素基本计算
+  python cli.py sr --calculate
+  
+  # Sr同位素自定义参数计算
+  python cli.py sr --calculate --F-highT 20e9 --R-river 0.705
+  
+  # Sr同位素蒙特卡洛模拟（二叠纪）
+  python cli.py sr --monte-carlo --scenario permian --n-runs 5000
+  
+  # Sr同位素情景分析（Wang et al., 2021 Scenario 7）
+  python cli.py sr --scenario-analysis scenario7 --n-runs 3000
+  
+  # Sr同位素敏感性分析 - 河流同位素
+  python cli.py sr --sensitivity R_river --sens-range 0.705 0.725
+  
+  # Sr同位素敏感性分析 - 高温热液通量
+  python cli.py sr --sensitivity F_highT --sens-range 2e9 35e9
+  
   # 列出支持的体系
   python cli.py list
         """
@@ -200,6 +218,65 @@ Examples:
     n_parser.add_argument('--n-monte-carlo', type=int, default=2000,
                          help='Number of Monte Carlo samples for uncertainty analysis (default: 2000)')
     
+    # ===== Sr同位素命令 =====
+    sr_parser = subparsers.add_parser('sr', help='Strontium isotope system (ocean box model)')
+    sr_parser.add_argument('--scenario', type=str, default='modern',
+                          choices=['modern', 'permian'],
+                          help='Model scenario (default: modern)')
+    
+    # 基本计算
+    sr_parser.add_argument('--calculate', action='store_true',
+                          help='Calculate seawater Sr ratio from fluxes')
+    sr_parser.add_argument('--F-river', type=float, default=47.6e9,
+                          help='Riverine flux in mol/yr (default: 47.6e9)')
+    sr_parser.add_argument('--R-river', type=float, default=0.71107,
+                          help='Riverine 87Sr/86Sr (default: 0.71107)')
+    sr_parser.add_argument('--F-highT', type=float, default=8.04e9,
+                          help='High-T hydrothermal flux in mol/yr (default: 8.04e9)')
+    sr_parser.add_argument('--R-highT', type=float, default=0.7037,
+                          help='High-T hydrothermal 87Sr/86Sr (default: 0.7037)')
+    sr_parser.add_argument('--F-lowT', type=float, default=10e9,
+                          help='Low-T hydrothermal flux in mol/yr (default: 10e9)')
+    sr_parser.add_argument('--R-lowT', type=float, default=0.7084,
+                          help='Low-T hydrothermal 87Sr/86Sr (default: 0.7084)')
+    sr_parser.add_argument('--F-dia', type=float, default=3.4e9,
+                          help='Diagenetic flux in mol/yr (default: 3.4e9)')
+    sr_parser.add_argument('--R-dia', type=float, default=0.7084,
+                          help='Diagenetic 87Sr/86Sr (default: 0.7084)')
+    
+    # 蒙特卡洛模拟
+    sr_parser.add_argument('--monte-carlo', action='store_true',
+                          help='Run Monte Carlo stochastic simulation')
+    sr_parser.add_argument('--n-runs', type=int, default=5000,
+                          help='Number of Monte Carlo runs (default: 5000)')
+    sr_parser.add_argument('--time-span', type=float, nargs=2, default=[299, 252],
+                          metavar=('START', 'END'),
+                          help='Time span in Ma (default: 299 252 for Permian)')
+    sr_parser.add_argument('--n-time-points', type=int, default=50,
+                          help='Number of time points (default: 50)')
+    
+    # 情景分析
+    sr_parser.add_argument('--scenario-analysis', type=str,
+                          choices=['scenario1', 'scenario2', 'scenario3', 
+                                  'scenario4', 'scenario5', 'scenario6', 'scenario7'],
+                          help='Run scenario analysis (Wang et al., 2021)')
+    
+    # 敏感性分析
+    sr_parser.add_argument('--sensitivity', type=str,
+                          choices=['F_river', 'R_river', 'F_highT', 'R_highT', 
+                                  'F_lowT', 'R_lowT', 'F_dia', 'R_dia'],
+                          help='Parameter for sensitivity analysis')
+    sr_parser.add_argument('--sens-range', type=float, nargs=2, default=None,
+                          metavar=('MIN', 'MAX'),
+                          help='Sensitivity range (auto if not specified)')
+    sr_parser.add_argument('--n-steps', type=int, default=50,
+                          help='Number of steps for sensitivity (default: 50)')
+    
+    # 输出
+    sr_parser.add_argument('--output', type=str, help='Output CSV file path')
+    sr_parser.add_argument('--verbose', '-v', action='store_true',
+                          help='Verbose output')
+    
     # ===== U同位素命令 =====
     u_parser = subparsers.add_parser('u', help='Uranium isotope system')
     u_parser.add_argument('--file', type=str,
@@ -268,6 +345,8 @@ Examples:
         run_u_analysis(args)
     elif args.command == 'n':
         run_n_analysis(args)
+    elif args.command == 'sr':
+        run_sr_analysis(args)
 
 
 def list_systems():
@@ -280,12 +359,12 @@ def list_systems():
         ('n', 'Nitrogen', '氮循环，硝酸盐可利用性示踪'),
         ('u', 'Uranium', '海洋铀循环，氧化还原条件示踪'),
         ('s', 'Sulfur', '硫循环，硫酸盐还原（计划中）'),
-        ('sr', 'Strontium', 'Sr同位素，风化示踪（计划中）'),
+        ('sr', 'Strontium', 'Sr同位素海洋箱模型（Wang et al., 2021）'),
         ('nd', 'Neodymium', 'Nd同位素，洋流循环（计划中）'),
     ]
     
     for element, name, description in systems:
-        status = "✓" if element in ['mg', 'c', 'n', 'u'] else "○"
+        status = "✓" if element in ['mg', 'c', 'n', 'u', 'sr'] else "○"
         print(f"  {status} {element.upper():2} - {name:12} : {description}")
     
     print("\n✓ = Implemented, ○ = Planned")
@@ -414,6 +493,34 @@ def show_info(element: str):
         print(f"  δ¹⁵N_sed = (1-f) × δ¹⁵N_NH4 + f × δ¹⁵N_NO3")
         print(f"  where f = nitrate assimilator fraction")
         print(f"  Peak δ¹⁵N occurs at f ≈ 0.48")
+    
+    elif element == 'sr':
+        from systems.sr import SrIsotopeSystem, get_sr_parameters
+        params = get_sr_parameters()
+        
+        print(f"Element: {params.name}")
+        print(f"Reference: Wang et al. (2021) Earth-Science Reviews")
+        print(f"Reference standard: {params.reference_standard}")
+        
+        print(f"\nModel: Four-component oceanic box model")
+        print(f"  R_sw = (F_riv×R_riv + F_highT×R_highT + F_lowT×R_lowT + F_dia×R_dia) / F_total")
+        
+        print(f"\nEnd-members (⁸⁷Sr/⁸⁶Sr):")
+        for name, data in params.end_members.items():
+            if isinstance(data, dict) and 'ratio' in data:
+                print(f"  {name:20}: {data['ratio']:.5f}")
+        
+        print(f"\nReservoir mass: {params.reservoir_mass:.2e} mol")
+        print(f"Residence time: ~2.6 Myr")
+        
+        print(f"\nModern fluxes (10⁹ mol/yr):")
+        for name, value in params.input_fluxes.items():
+            print(f"  {name:20}: {value/1e9:.2f}")
+        
+        print(f"\nKey findings from Wang et al. (2021):")
+        print(f"  - Hydrothermal activity is the main driver of Permian Sr isotope trends")
+        print(f"  - Low-temperature hydrothermal flux increases with global warming")
+        print(f"  - Continental weathering changes alone cannot explain the record")
     
     print()
 
@@ -1579,6 +1686,258 @@ def run_mg_siliciclastic_analysis(args):
         print()
         print("  Note: Higher δ²⁶Mg_clay indicates stronger weathering")
         print("        (more ²⁴Mg leached, ²⁶Mg enriched in residue)")
+        print()
+    
+    print("="*70)
+    print("Analysis complete")
+    print("="*70 + "\n")
+
+
+def run_sr_analysis(args):
+    """
+    运行Sr同位素分析
+    基于Wang et al. (2021)随机海洋箱模型
+    """
+    from systems.sr import SrIsotopeSystem, SrFluxConfig
+    import pandas as pd
+    
+    print("\n" + "="*70)
+    print("Sr Isotope Ocean Box Model")
+    print("Based on: Wang et al. (2021) Earth-Science Reviews")
+    print("="*70 + "\n")
+    
+    # 创建Sr同位素体系
+    sr = SrIsotopeSystem(scenario=args.scenario)
+    
+    # ===== 基本计算 =====
+    if args.calculate or not (args.monte_carlo or args.scenario_analysis or args.sensitivity):
+        print("[Seawater Sr Isotope Calculation]")
+        print("-" * 50)
+        
+        # 创建通量配置
+        config = SrFluxConfig(
+            F_river=args.F_river,
+            R_river=args.R_river,
+            F_hydrothermal_highT=args.F_highT,
+            R_hydrothermal_highT=args.R_highT,
+            F_hydrothermal_lowT=args.F_lowT,
+            R_hydrothermal_lowT=args.R_lowT,
+            F_diagenetic=args.F_dia,
+            R_diagenetic=args.R_dia,
+        )
+        
+        # 计算海水Sr同位素
+        ratio = sr.calculate_seawater_ratio(config)
+        
+        print("Input parameters:")
+        print(f"  Riverine:     F = {args.F_river/1e9:.2f}×10⁹ mol/yr, R = {args.R_river:.5f}")
+        print(f"  High-T hydro: F = {args.F_highT/1e9:.2f}×10⁹ mol/yr, R = {args.R_highT:.5f}")
+        print(f"  Low-T hydro:  F = {args.F_lowT/1e9:.2f}×10⁹ mol/yr, R = {args.R_lowT:.5f}")
+        print(f"  Diagenetic:   F = {args.F_dia/1e9:.2f}×10⁹ mol/yr, R = {args.R_dia:.5f}")
+        
+        print(f"\nResult:")
+        print(f"  Seawater ⁸⁷Sr/⁸⁶Sr = {ratio:.5f}")
+        
+        # 与现代海水比较
+        modern_observed = 0.70917
+        diff = (ratio - modern_observed) * 10000  # ppm
+        print(f"  Modern observed:    {modern_observed:.5f}")
+        print(f"  Difference:         {diff:+.2f} ppm")
+        print()
+    
+    # ===== 敏感性分析 =====
+    if args.sensitivity:
+        print(f"[Sensitivity Analysis: {args.sensitivity}]")
+        print("-" * 50)
+        
+        # 确定参数范围
+        if args.sens_range:
+            param_range = tuple(args.sens_range)
+        else:
+            # 自动范围
+            default_ranges = {
+                'F_river': (10e9, 190e9),
+                'R_river': (0.705, 0.725),
+                'F_highT': (2e9, 35e9),
+                'R_highT': (0.703, 0.704),
+                'F_lowT': (2.5e9, 40e9),
+                'R_lowT': (0.7025, 0.7084),
+                'F_dia': (1e9, 10e9),
+                'R_dia': (0.707, 0.710),
+            }
+            param_range = default_ranges.get(args.sensitivity, (0, 1))
+        
+        result = sr.sensitivity_analysis(
+            param_name=args.sensitivity,
+            param_range=param_range,
+            n_steps=args.n_steps
+        )
+        
+        if result.success:
+            param_vals = result.data['param_values']
+            sr_vals = result.data['sr_ratios']
+            
+            print(f"Parameter range: [{param_vals.min():.4e}, {param_vals.max():.4e}]")
+            print(f"Sr ratio range:  [{sr_vals.min():.5f}, {sr_vals.max():.5f}]")
+            
+            # 显示关键点
+            print(f"\nKey points:")
+            for i in [0, len(param_vals)//2, -1]:
+                print(f"  {args.sensitivity}={param_vals[i]:.4e}: R_sw={sr_vals[i]:.5f}")
+            
+            # 保存结果
+            if args.output:
+                df = pd.DataFrame({
+                    args.sensitivity: param_vals,
+                    'Sr_ratio': sr_vals,
+                    'sensitivity': result.data['sensitivity']
+                })
+                df.to_csv(args.output, index=False)
+                print(f"\nResults saved to: {args.output}")
+        
+        print()
+    
+    # ===== 情景分析 =====
+    if args.scenario_analysis:
+        print(f"[Scenario Analysis: {args.scenario_analysis}]")
+        print("-" * 50)
+        print(f"Running {args.n_runs} Monte Carlo simulations...")
+        print("Note: No observation-based filtering in scenario analysis")
+        
+        # 创建自定义的随机模型，不过滤
+        from systems.sr.model import StochasticSrModel
+        import numpy as np
+        
+        time_points = np.linspace(args.time_span[0], args.time_span[1], args.n_time_points)
+        stochastic = StochasticSrModel(
+            time_points=time_points,
+            observed_data=None  # 不过滤
+        )
+        
+        # 获取情景参数范围
+        from systems.sr.parameters import STOCHASTIC_RANGES
+        param_ranges = STOCHASTIC_RANGES.copy()
+        
+        # 根据情景移除固定参数
+        fixed_map = {
+            'scenario1': ['F_diagenetic', 'R_diagenetic'],
+            'scenario2': ['R_river', 'F_diagenetic', 'R_diagenetic'],
+            'scenario3': ['F_river', 'F_diagenetic', 'R_diagenetic'],
+            'scenario4': ['F_hydrothermal_highT', 'F_diagenetic', 'R_diagenetic'],
+            'scenario5': ['F_hydrothermal_lowT', 'F_diagenetic', 'R_diagenetic'],
+            'scenario6': ['F_hydrothermal_highT', 'F_hydrothermal_lowT', 'F_diagenetic', 'R_diagenetic'],
+            'scenario7': ['F_river', 'R_river', 'F_diagenetic', 'R_diagenetic'],
+        }
+        
+        for param in fixed_map.get(args.scenario_analysis, []):
+            if param in param_ranges:
+                del param_ranges[param]
+        
+        result = stochastic.run_monte_carlo(
+            n_runs=args.n_runs,
+            param_ranges=param_ranges,
+            verbose=args.verbose
+        )
+        
+        if result.success:
+            print(f"\nResults:")
+            print(f"  Successful runs: {result.data['n_successful']}")
+            print(f"  Success rate: {result.data['success_rate']:.2%}")
+            
+            # 显示参数统计
+            print(f"\nParameter statistics:")
+            for param_name, stats in result.statistics.items():
+                print(f"  {param_name}:")
+                print(f"    Mean:   {stats['mean']:.3e}")
+                print(f"    Median: {stats['median']:.3e}")
+                print(f"    Range:  [{stats['min']:.3e}, {stats['max']:.3e}]")
+            
+            # 保存结果
+            if args.output:
+                output_data = {
+                    'time_Ma': result.time,
+                    'mean_Sr_ratio': result.data['mean_ratio'],
+                    'std_Sr_ratio': result.data['std_ratio'],
+                    'p2.5': result.data['percentile_2.5'],
+                    'p97.5': result.data['percentile_97.5'],
+                }
+                
+                # 添加参数统计
+                for param_name in result.statistics.keys():
+                    param_vals = result.get_parameter_array(param_name)
+                    output_data[f'{param_name}_values'] = param_vals[:len(result.time)]
+                
+                df = pd.DataFrame(output_data)
+                df.to_csv(args.output, index=False)
+                print(f"\nResults saved to: {args.output}")
+        else:
+            print(f"  Error: {result.message}")
+        
+        print()
+    
+    # ===== 蒙特卡洛模拟 =====
+    if args.monte_carlo and not args.scenario_analysis:
+        print("[Monte Carlo Stochastic Simulation]")
+        print("-" * 50)
+        print(f"Scenario: {args.scenario}")
+        print(f"Time span: {args.time_span[0]} - {args.time_span[1]} Ma")
+        print(f"Number of runs: {args.n_runs}")
+        print("Note: Running without observation-based filtering")
+        print()
+        
+        # 使用不过滤的随机模型
+        from systems.sr.model import StochasticSrModel
+        import numpy as np
+        from systems.sr.parameters import STOCHASTIC_RANGES
+        
+        time_points = np.linspace(args.time_span[0], args.time_span[1], args.n_time_points)
+        stochastic = StochasticSrModel(
+            time_points=time_points,
+            observed_data=None  # 不过滤
+        )
+        
+        result = stochastic.run_monte_carlo(
+            n_runs=args.n_runs,
+            param_ranges=STOCHASTIC_RANGES,
+            verbose=args.verbose
+        )
+        
+        if result.success:
+            print(f"\nSimulation Results:")
+            print(f"  Success rate: {result.data['success_rate']:.2%}")
+            print(f"  Successful runs: {result.data['n_successful']}/{args.n_runs}")
+            
+            print(f"\nSeawater Sr isotope evolution:")
+            ages = result.time
+            mean_ratio = result.data['mean_ratio']
+            std_ratio = result.data['std_ratio']
+            
+            # 显示关键时间点
+            key_ages = [ages[0], ages[len(ages)//2], ages[-1]]
+            print(f"  {'Age (Ma)':<12} {'Mean':<10} {'Std':<10}")
+            print(f"  {'-'*32}")
+            for age in key_ages:
+                idx = np.argmin(np.abs(ages - age))
+                print(f"  {age:<12.1f} {mean_ratio[idx]:<10.5f} {std_ratio[idx]:<10.5f}")
+            
+            print(f"\nParameter statistics:")
+            for param_name, stats in list(result.statistics.items())[:3]:
+                print(f"  {param_name}: {stats['mean']:.3e} ± {stats['std']:.3e}")
+            
+            # 保存结果
+            if args.output:
+                df = pd.DataFrame({
+                    'time_Ma': ages,
+                    'mean_Sr_ratio': mean_ratio,
+                    'std_Sr_ratio': std_ratio,
+                    'p2.5': result.data['percentile_2.5'],
+                    'p97.5': result.data['percentile_97.5'],
+                })
+                df.to_csv(args.output, index=False)
+                print(f"\nResults saved to: {args.output}")
+        else:
+            print(f"  Simulation failed: {result.message}")
+        
         print()
     
     print("="*70)

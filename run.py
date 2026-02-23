@@ -50,7 +50,7 @@ def run_mg_weathering_analysis():
     # 示例2：稳态海水δ²⁶Mg
     print("\n[2] 稳态海水δ²⁶Mg计算")
     print("-"*60)
-    from systems.mg.model import WeatheringFluxConfig
+    from systems.mg.carbonate import WeatheringFluxConfig
     
     configs = [
         (0.2, "碳酸盐主导风化"),
@@ -171,12 +171,86 @@ def run_c_analysis():
             print(f"  F_doc = {F_odoc/1e18:5.2f}×10¹⁸: δ¹³C_carb = {delta_carb:+.2f}‰")
 
 
+def run_sr_analysis():
+    """Sr同位素分析示例 - 基于Wang et al. (2021)"""
+    print("\n" + "="*80)
+    print("Sr同位素海洋箱模型 (Wang et al., 2021)")
+    print("="*80)
+    
+    from systems.sr import SrIsotopeSystem, SrFluxConfig
+    
+    # 创建Sr同位素体系
+    sr = SrIsotopeSystem(scenario='modern')
+    
+    # 示例1: 基本质量平衡
+    print("\n[1] 现代海水⁸⁷Sr/⁸⁶Sr计算")
+    print("-"*60)
+    modern_ratio = sr.calculate_seawater_ratio()
+    print(f"  计算值: {modern_ratio:.5f}")
+    print(f"  观测值: 0.70917")
+    print(f"  偏差: {(modern_ratio - 0.70917)*10000:+.2f} ppm")
+    
+    # 示例2: 不同端元混合
+    print("\n[2] 四端元混合示例")
+    print("-"*60)
+    configs = [
+        (47.6e9, 0.71107, "现代河流"),
+        (100e9, 0.71107, "增强风化通量"),
+        (47.6e9, 0.705, "低放射成因河流（玄武岩主导）"),
+        (47.6e9, 0.720, "高放射成因河流（古老地壳主导）"),
+    ]
+    
+    for f_riv, r_riv, desc in configs:
+        ratio = sr.calculate_seawater_ratio(F_river=f_riv, R_river=r_riv)
+        print(f"  {desc}: {ratio:.5f}")
+    
+    # 示例3: 热液活动影响
+    print("\n[3] 热液活动对海水Sr的影响")
+    print("-"*60)
+    print("  高温热液通量变化:")
+    f_highT_values = [2e9, 8e9, 20e9, 35e9]
+    for f in f_highT_values:
+        ratio = sr.calculate_seawater_ratio(F_hydrothermal_highT=f)
+        print(f"    F_highT = {f/1e9:.0f}×10⁹ mol/yr: R_sw = {ratio:.5f}")
+    
+    # 示例4: 二叠纪演化趋势（简化演示）
+    print("\n[4] 二叠纪Sr同位素演化趋势")
+    print("-"*60)
+    sr_permian = SrIsotopeSystem(scenario='permian')
+    
+    ages_ma = [299, 273, 265, 259, 252]
+    stages = ["Asselian", "Kungurian", "Wordian", "Capitanian", "Changhsingian"]
+    
+    print(f"  {'时期':<15} {'年龄(Ma)':<10} {'⁸⁷Sr/⁸⁶Sr':<12} {'趋势':<10}")
+    print("  " + "-"*50)
+    
+    # 典型观测值（基于Wang et al., 2021）
+    observed = [0.70827, 0.7070, 0.70683, 0.7069, 0.70717]
+    
+    for i, (age, stage, ratio) in enumerate(zip(ages_ma, stages, observed)):
+        if i > 0:
+            change = "↓" if ratio < observed[i-1] else "↑"
+        else:
+            change = "→"
+        print(f"  {stage:<15} {age:<10} {ratio:<12.5f} {change:<10}")
+    
+    print("\n  趋势解释:")
+    print("    - 早-中二叠世: Sr同位素持续下降，反映热液活动增强")
+    print("    - Capitanian: 达到最低值(~0.70683)")
+    print("    - 晚二叠世: 上升，可能与大陆风化增强有关")
+    
+    print("\n" + "="*80)
+    print("Sr同位素分析完成")
+    print("="*80)
+
+
 def main():
     """主函数"""
     print("\n" + "#"*80)
     print("#" + " "*78 + "#")
     print("#" + "  同位素质量平衡模型 v2.0".center(78) + "#")
     print("#" + "  基于Kasemann等(2014)Mg同位素风化模型".center(78) + "#")
+    print("#" + "  以及Wang等(2021)Sr同位素海洋箱模型".center(78) + "#")
     print("#" + " "*78 + "#")
     print("#"*80)
     
@@ -185,6 +259,9 @@ def main():
     
     # 运行C同位素分析
     run_c_analysis()
+    
+    # 运行Sr同位素分析
+    run_sr_analysis()
     
     print("\n" + "#"*80)
     print("所有分析完成!")
