@@ -217,12 +217,15 @@ class BatchProcessor:
             delta_diag=self.delta_diag
         )
         
+        # 估算缺氧面积
+        anoxic_area = self.system.estimate_anoxic_area(result['f_anox'])
+        
         output_data = {
             'f_anox': result['f_anox'],
             'f_oxic': result['f_oxic'],
             'delta238_seawater': result['delta238_seawater'],
             'delta238_carb_corrected': result['delta238_carb_corrected'],
-            'anoxic_area_percent': self.system.estimate_anoxic_area(result['f_anox'])
+            'anoxic_area_percent': anoxic_area
         }
         
         # 不确定度分析
@@ -233,9 +236,24 @@ class BatchProcessor:
                     n_samples=self.n_monte_carlo,
                     random_seed=42 + index  # 确保可复现但不同样品不同
                 )
+                
+                # f_anox 不确定度
                 output_data['f_anox_std'] = mc_result['f_anox_std']
                 output_data['f_anox_ci_lower'] = mc_result['f_anox_ci'][0]
                 output_data['f_anox_ci_upper'] = mc_result['f_anox_ci'][1]
+                
+                # f_oxic 不确定度 (f_oxic = 1 - f_anox)
+                output_data['f_oxic_std'] = mc_result['f_anox_std']  # 相同标准差
+                output_data['f_oxic_ci_lower'] = 1 - mc_result['f_anox_ci'][1]
+                output_data['f_oxic_ci_upper'] = 1 - mc_result['f_anox_ci'][0]
+                
+                # anoxic_area_percent 不确定度 (通过误差传播)
+                area_mean = anoxic_area
+                area_std = self.system.estimate_anoxic_area(mc_result['f_anox_mean'] + mc_result['f_anox_std']) - area_mean
+                output_data['anoxic_area_std'] = abs(area_std)
+                output_data['anoxic_area_ci_lower'] = self.system.estimate_anoxic_area(mc_result['f_anox_ci'][0])
+                output_data['anoxic_area_ci_upper'] = self.system.estimate_anoxic_area(mc_result['f_anox_ci'][1])
+                
             except Exception:
                 pass
         
