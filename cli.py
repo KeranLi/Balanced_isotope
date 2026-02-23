@@ -40,6 +40,15 @@ Examples:
   # N同位素关系曲线
   python cli.py n --curve --output n_curve.csv
   
+  # N同位素批量处理Excel文件（含不确定度）
+  python cli.py n --file data/nitrogen_data.xlsx --column delta15N --delta-std 0.3 --output results/n_results.xlsx
+  
+  # N同位素批量处理（自定义分馏系数不确定度）
+  python cli.py n --file data/nitrogen_data.csv --delta-std 0.5 --epsilon-fix-std 0.5 --epsilon-wcd-std 2.0 --output results/n_results.csv
+  
+  # N同位素批量处理CSV文件（早三叠世情景）
+  python cli.py n --file data/nitrogen_data.csv --scenario early_triassic --output results/n_triassic.csv
+  
   # U同位素单点计算
   python cli.py u --delta-carb -0.65 --steady-state
   
@@ -158,8 +167,7 @@ Examples:
     # ===== N同位素命令 =====
     n_parser = subparsers.add_parser('n', help='Nitrogen isotope system')
     n_parser.add_argument('--scenario', type=str, default='modern',
-                         choices=['modern', 'early_triassic', 'neoproterozoic'],
-                         help='Model scenario')
+                         help='Model scenario: modern, early_triassic, neoproterozoic (default: modern)')
     n_parser.add_argument('--f-assimilator', type=float,
                          help='Nitrate assimilator fraction (0-1) for forward model')
     n_parser.add_argument('--delta15N', type=float,
@@ -179,6 +187,18 @@ Examples:
                          help='Number of Monte Carlo samples')
     n_parser.add_argument('--output', type=str,
                          help='Output file path (CSV format)')
+    n_parser.add_argument('--file', type=str,
+                         help='Input Excel/CSV file with nitrogen isotope data for batch processing')
+    n_parser.add_argument('--column', type=str, default='delta15N',
+                         help='Column name for delta15N values (default: delta15N)')
+    n_parser.add_argument('--delta-std', type=float, default=0.3,
+                         help='Measurement uncertainty for delta15N (1σ, ‰, default: 0.3)')
+    n_parser.add_argument('--epsilon-fix-std', type=float, default=0.5,
+                         help='Uncertainty of epsilon_fix (1σ, ‰, default: 0.5)')
+    n_parser.add_argument('--epsilon-wcd-std', type=float, default=2.0,
+                         help='Uncertainty of epsilon_wcd (1σ, ‰, default: 2.0)')
+    n_parser.add_argument('--n-monte-carlo', type=int, default=2000,
+                         help='Number of Monte Carlo samples for uncertainty analysis (default: 2000)')
     
     # ===== U同位素命令 =====
     u_parser = subparsers.add_parser('u', help='Uranium isotope system')
@@ -1154,6 +1174,76 @@ def run_n_analysis(args):
     print(f"Scenario: {args.scenario}")
     print(f"Reference: Atmospheric N₂ (δ¹⁵N = 0‰)")
     print()
+    
+    # ===== 批量处理模式 =====
+    if args.file:
+        print("[Batch Processing Mode]")
+        print("-" * 50)
+        print(f"  Input file: {args.file}")
+        print(f"  Scenario: {args.scenario}")
+        print(f"  Delta15N column: {args.column}")
+        print(f"  Measurement uncertainty (1σ): {args.delta_std}‰")
+        print(f"  Epsilon_fix uncertainty: ±{args.epsilon_fix_std}‰")
+        print(f"  Epsilon_wcd uncertainty: ±{args.epsilon_wcd_std}‰")
+        print(f"  Monte Carlo samples: {args.n_monte_carlo}")
+        print()
+        
+        from toolkit.io import BatchProcessor
+        
+        try:
+            # 创建批量处理器（启用不确定度计算）
+            processor = BatchProcessor(
+                element='n', 
+                scenario=args.scenario,
+                include_uncertainty=True,
+                n_monte_carlo=args.n_monte_carlo,
+                epsilon_fix_std=args.epsilon_fix_std,
+                epsilon_wcd_std=args.epsilon_wcd_std
+            )
+            
+            # 处理文件
+            results_df = processor.process_file(
+                args.file,
+                output_path=args.output,
+                show_progress=True
+            )
+            
+            # 显示摘要
+            print("\n" + "=" * 50)
+            print("Processing Summary:")
+            print("=" * 50)
+            print(f"Total samples: {len(results_df)}")
+            
+            if 'f_assimilator' in results_df.columns:
+                success_count = (~results_df['f_assimilator'].isna()).sum()
+                print(f"Successful: {success_count}")
+                print(f"Failed: {len(results_df) - success_count}")
+                print(f"\nf_assimilator statistics:")
+                print(f"  Mean: {results_df['f_assimilator'].mean():.3f}")
+                print(f"  Range: [{results_df['f_assimilator'].min():.3f}, {results_df['f_assimilator'].max():.3f}]")
+                
+                # 显示不确定度统计（如果有）
+                if 'f_assimilator_std' in results_df.columns:
+                    mean_std = results_df['f_assimilator_std'].mean()
+                    print(f"\nUncertainty (Monte Carlo, n={args.n_monte_carlo}):")
+                    print(f"  Mean 1σ uncertainty: ±{mean_std:.3f}")
+                    print(f"  Typical 95% CI width: ±{mean_std * 2:.3f}")
+            
+            if args.output:
+                print(f"\nResults saved to: {args.output}")
+                print("\nOutput columns:")
+                print("  - f_assimilator: 反演结果")
+                print("  - f_assimilator_std: 标准差 (1σ)")
+                print("  - f_assimilator_ci68: 68% 置信区间")
+                print("  - f_assimilator_ci95: 95% 置信区间")
+        
+        except Exception as e:
+            print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        print()
+        return
     
     # ===== 关系曲线计算 =====
     if args.curve:

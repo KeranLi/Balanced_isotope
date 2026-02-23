@@ -43,7 +43,9 @@ class BatchProcessor:
                  apply_diagenetic_correction: bool = True,
                  delta_diag: float = 0.4,
                  include_uncertainty: bool = True,
-                 n_monte_carlo: int = 1000):
+                 n_monte_carlo: int = 1000,
+                 epsilon_fix_std: Optional[float] = None,
+                 epsilon_wcd_std: Optional[float] = None):
         """
         初始化批量处理器
         
@@ -68,6 +70,8 @@ class BatchProcessor:
         self.delta_diag = delta_diag
         self.include_uncertainty = include_uncertainty
         self.n_monte_carlo = n_monte_carlo
+        self.epsilon_fix_std = epsilon_fix_std  # N同位素固氮分馏不确定度
+        self.epsilon_wcd_std = epsilon_wcd_std  # N同位素水柱反硝化分馏不确定度
         
         # 初始化同位素体系
         self.system = self._init_system()
@@ -245,28 +249,117 @@ class BatchProcessor:
     def _process_n(self, index: int,
                   isotope_data: Dict[str, np.ndarray]) -> ProcessingResult:
         """处理N同位素数据"""
+        import time
+        start_time = time.time()
+        
         delta15 = isotope_data['delta'][index]
         
+        # 获取不确定度（如果有）
+        delta_std = isotope_data.get('delta_std', [None])[index] if 'delta_std' in isotope_data else None
+        
         input_data = {'delta15_sed': delta15}
+        if delta_std is not None:
+            input_data['delta15_std'] = delta_std
         for key in ['sample_id', 'depth', 'age', 'elevation']:
             if key in isotope_data:
                 input_data[key] = isotope_data[key][index]
         
-        # 反向模型：从沉积物δ¹⁵N计算f_assimilator
-        result = self.system.inverse_model(delta15_sed=delta15)
-        
-        output_data = {
-            'f_assimilator': result['f_assimilator'],
-            'delta15_sed_calculated': result['delta15N_sed_calculated'],
-            'residual': result['residual']
-        }
-        
-        return ProcessingResult(
-            success=True,
-            index=index,
-            input_data=input_data,
-            output_data=output_data
-        )
+        try:
+            # 反向模型：从沉积物δ¹⁵N计算f_assimilator
+            result = self.system.inverse_model(delta15N_sed=delta15)
+            
+            f_assimilator = result['f_assimilator']
+            
+            output_data = {
+                'f_assimilator': f_assimilator,
+                'delta15_sed_calculated': result['delta15N_sed_calculated'],
+                'residual': result['residual']
+            }
+            
+            # 不确定度分析：基于测量误差和分馏系数不确定性
+            if self.include_uncertainty:
+                try:
+                    # 使用蒙特卡洛评估 f_assimilator 的不确定度
+                    # 考虑 delta15 测量误差和分馏系数不确定性
+                    n_samples = min(self.n_monte_carlo, 5000)  # 限制样本数
+                    
+                    # 从测量值的不确定性分布中采样
+                    if delta_std is not None:
+                        delta_samples = np.random.normal(delta15, delta_std, n_samples)
+                    else:
+                        delta_samples = np.random.normal(delta15, 0.3, n_samples)  # 默认0.3‰误差
+                    
+                    # 从模型参数中获取分馏系数基准值和范围
+                    ff_params = self.system.params.fractionation_factors
+                    epsilon_fix_base = self.system.fractionation.epsilon_fix
+                    epsilon_wcd_base = self.system.fractionation.epsilon_wcd
+                    
+                    # 获取用户指定或默认的分馏系数不确定度
+                    # 优先使用用户传入的参数，其次是模型参数范围，最后是硬编码默认值
+                    if self.epsilon_fix_std is not None:
+                        eps_fix_std = self.epsilon_fix_std
+                    else:
+                        # 从模型参数计算标准差（范围/4 ≈ 95%置信区间）
+                        eps_fix_min = ff_params.get('epsilon_fixation_min', epsilon_fix_base - 1.5)
+                        eps_fix_max = ff_params.get('epsilon_fixation_max', epsilon_fix_base + 1.5)
+                        eps_fix_std = (eps_fix_max - eps_fix_min) / 4.0
+                    
+                    if self.epsilon_wcd_std is not None:
+                        eps_wcd_std = self.epsilon_wcd_std
+                    else:
+                        eps_wcd_min = ff_params.get('epsilon_wcd_min', epsilon_wcd_base - 4.0)
+                        eps_wcd_max = ff_params.get('epsilon_wcd_max', epsilon_wcd_base + 4.0)
+                        eps_wcd_std = (eps_wcd_max - eps_wcd_min) / 4.0
+                    
+                    f_samples = []
+                    for i in range(n_samples):
+                        # 从正态分布中采样分馏系数（反映参数不确定性）
+                        eps_fix = np.random.normal(epsilon_fix_base, eps_fix_std)
+                        eps_wcd = np.random.normal(epsilon_wcd_base, eps_wcd_std)
+                        
+                        # 计算该样本的 f
+                        try:
+                            # 使用采样的 delta15 和分馏系数
+                            delta_sample = delta_samples[i]
+                            res = self.system.inverse_model(
+                                delta15N_sed=delta_sample,
+                                epsilon_fix=eps_fix,
+                                epsilon_wcd=eps_wcd
+                            )
+                            f_samples.append(res['f_assimilator'])
+                        except:
+                            pass
+                    
+                    if len(f_samples) > 100:
+                        f_samples = np.array(f_samples)
+                        output_data['f_assimilator_std'] = np.std(f_samples)
+                        output_data['f_assimilator_ci68'] = (
+                            np.percentile(f_samples, 16),
+                            np.percentile(f_samples, 84)
+                        )
+                        output_data['f_assimilator_ci95'] = (
+                            np.percentile(f_samples, 2.5),
+                            np.percentile(f_samples, 97.5)
+                        )
+                except Exception:
+                    pass
+            
+            return ProcessingResult(
+                success=True,
+                index=index,
+                input_data=input_data,
+                output_data=output_data,
+                processing_time=time.time() - start_time
+            )
+            
+        except Exception as e:
+            return ProcessingResult(
+                success=False,
+                index=index,
+                input_data=input_data,
+                error_message=str(e),
+                processing_time=time.time() - start_time
+            )
     
     def _process_c(self, index: int,
                   isotope_data: Dict[str, np.ndarray]) -> ProcessingResult:
