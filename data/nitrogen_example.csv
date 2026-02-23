@@ -1,0 +1,16 @@
+sample_id,age_ma,delta15N,lithology
+N-001,850,0.5,shale
+N-002,845,1.2,shale
+N-003,840,2.0,mudstone
+N-004,835,1.8,shale
+N-005,830,2.5,carbonaceous shale
+N-006,825,3.0,shale
+N-007,820,3.5,mudstone
+N-008,815,4.0,shale
+N-009,810,4.5,carbonaceous shale
+N-010,805,5.0,shale
+N-011,800,5.2,mudstone
+N-012,795,5.5,shale
+N-013,790,5.8,carbonaceous shale
+N-014,785,6.0,shale
+N-015,780,6.2,mudstone
