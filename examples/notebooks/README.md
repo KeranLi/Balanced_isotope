@@ -41,6 +41,7 @@ jupyter lab
 |------|------|------|
 | `01_basic_usage.ipynb` | 核心工具、同位素公式、各体系基础用法 | ⭐ 入门 |
 | `02_nitrogen_isotope_reproduction.ipynb` | **N同位素论文复现**：Kang et al. (2023) & Ma et al. (2025) | ⭐⭐ 进阶 |
+| `03_sr_isotope_wang2021.ipynb` | **Sr同位素论文复现**：Wang et al. (2021) ESR 蒙特卡洛海洋箱模型 | ⭐⭐⭐ 高级 |
 
 ## 使用建议
 
@@ -106,6 +107,20 @@ ax.spines['right'].set_visible(False)    # 隐藏右边框
 ax.spines['bottom'].set_linewidth(2.5)   # 加粗底边
 ax.spines['left'].set_linewidth(2.5)     # 加粗左边
 ```
+
+**Sr 同位素 Notebook 包含的图表（Wang et al., 2021）：**
+- 现代Sr循环各端元贡献图（饼图+柱状图）
+- 二叠纪海水Sr同位素演化曲线
+- 蒙特卡洛随机模拟结果（参数分布直方图）
+- 7种情景分析对比图
+- 敏感性分析曲线
+
+**Sr同位素Notebook主要内容：**
+- 四端元海洋箱模型（河流、高温热液、低温热液、成岩作用）
+- 蒙特卡洛随机模拟（5000次运行）
+- 情景分析（Scenario 1-7）
+- 参数敏感性分析
+- 二叠纪Sr同位素演化复现
 
 **N 同位素 Notebook 包含的图表：**
 - 关系曲线图 (f_assimilator vs δ¹⁵N) - 包含现代海洋和 Huaibei Group 参考点
