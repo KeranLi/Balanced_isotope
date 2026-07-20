@@ -1,0 +1,51 @@
+# OS and editor noise
+.DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Spreadsheet lock files
+~$*.xlsx
+~$*.xls
+
+# Local research inputs. Example fixtures are explicitly kept below.
+data/*
+!data/README.md
+!data/nitrogen_example.csv
+!data/nitrogen_example.xlsx
+!data/nitrogen_with_uncertainty.xlsx
+!data/uranium_example.xlsx
+
+# Generated analyses, figures, and exported tables
+results/*
+!results/README.md
+!results/.gitkeep
+output/
+
+# Local manuscript attachments and previews
+attachments/*
+!attachments/README.md
+
+# Local copies of papers and other reference binaries
+reference/**/*.pdf
+reference/**/*.PDF
+
+# Generated standalone exports at the repository root
+/nitrogen_*.png
+/nitrogen_*.csv
+/nitrogen_*.xlsx
+
+# Local notebook checkpoints
+.ipynb_checkpoints/

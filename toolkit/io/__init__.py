@@ -20,7 +20,7 @@
     results = processor.process_file('data/input.xlsx')
     
     # 保存结果
-    handler.write(results, 'output/results.xlsx')
+    handler.write(results, 'results/results.xlsx')
 """
 
 from toolkit.io.data_handler import DataHandler, DataFormatError

@@ -35,7 +35,7 @@ class BatchProcessor:
     示例用法:
         processor = BatchProcessor('u')
         results = processor.process_file('data/input.xlsx')
-        processor.save_results(results, 'output/results.xlsx')
+        processor.save_results(results, 'results/results.xlsx')
     """
     
     def __init__(self, element: str, 

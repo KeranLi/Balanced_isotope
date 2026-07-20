@@ -40,7 +40,7 @@ class SrFluxConfig:
     """
     # 河流输入
     F_river: float = 47.6e9           # mol/yr
-    R_river: float = 0.71107          # ⁸⁷Sr/⁸⁶Sr
+    R_river: float = 0.71107          # 87Sr/86Sr
     
     # 高温热液输入（洋中脊）
     F_hydrothermal_highT: float = 8.04e9
@@ -237,8 +237,7 @@ class StochasticSrModel:
         # 计算95%置信区间
         diff = np.abs(sr_ratios - observed_interp)
         
-        # 简化：检查最大偏差是否在合理范围内
-        # 实际应用中可能需要更严格的统计检验
+        # 检查最大偏差是否在合理范围内
         max_allowed_diff = 0.0005  # 根据Wang et al.的不确定性
         
         return np.all(diff < max_allowed_diff)
@@ -338,8 +337,7 @@ class SrIsotopeSystem(RadiogenicSystem):
     - 随机蒙特卡洛模拟
     - 多种情景分析
     
-    继承自RadiogenicSystem因为Sr包含放射成因的⁸⁷Sr
-    （来自⁸⁷Rb衰变，但在海洋时间尺度上可忽略）
+    继承自RadiogenicSystem因为Sr包含放射成因的87Sr,来自87Rb衰变,但在海洋时间尺度上可忽略
     """
     
     ELEMENT = 'sr'
